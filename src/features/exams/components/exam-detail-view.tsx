@@ -4,6 +4,7 @@ import { Badge, Card, CardBody } from "@/components/ui/card";
 import { ErrorBlock, LoadingBlock } from "@/components/ui/feedback";
 import { StartAttemptButton } from "@/features/exams/components/start-attempt-button";
 import { useExam } from "@/features/exams/hooks/use-exams";
+import type { ExamDetailDto } from "@/features/exams/types";
 import { formatDurationMinutes, formatScore } from "@/lib/utils";
 
 function StatCard({ label, value }: { label: string; value: string }) {
@@ -17,8 +18,15 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function ExamDetailView({ examId }: { examId: string }) {
-  const examQuery = useExam(examId);
+export function ExamDetailView({
+  examId,
+  initialExam,
+}: {
+  examId: string;
+  /** Chi tiết đề do Server Component nạp sẵn (không có khi đề không tồn tại hoặc DB tắt). */
+  initialExam?: ExamDetailDto;
+}) {
+  const examQuery = useExam(examId, initialExam);
 
   if (examQuery.isPending) {
     return <LoadingBlock message="Đang tải đề thi…" />;

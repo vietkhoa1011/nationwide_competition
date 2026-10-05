@@ -13,6 +13,11 @@ import {
   useSubjects,
   type ExamListFilters,
 } from "@/features/exams/hooks/use-exams";
+import type {
+  ExamSummaryDto,
+  PaginatedResult,
+  SubjectDto,
+} from "@/features/exams/types";
 
 /**
  * Ô tìm kiếm giữ state cục bộ. Component được remount qua `key` khi từ khoá
@@ -51,10 +56,19 @@ function ExamSearchForm({
   );
 }
 
-export function ExamBrowser({ filters }: { filters: ExamListFilters }) {
+export function ExamBrowser({
+  filters,
+  initialSubjects,
+  initialExams,
+}: {
+  filters: ExamListFilters;
+  /** Dữ liệu trang đầu do Server Component nạp sẵn (không có khi truy vấn phía server lỗi). */
+  initialSubjects?: SubjectDto[];
+  initialExams?: PaginatedResult<ExamSummaryDto>;
+}) {
   const router = useRouter();
-  const subjectsQuery = useSubjects();
-  const examsQuery = useExams(filters);
+  const subjectsQuery = useSubjects(initialSubjects);
+  const examsQuery = useExams(filters, initialExams);
 
   function navigate(next: ExamListFilters) {
     const query = buildExamQueryString({ ...filters, ...next, page: next.page ?? 1 });

@@ -4,8 +4,6 @@ export const startAttemptBodySchema = z.object({
   examId: z.string().trim().min(1, "Thiếu mã đề thi."),
 });
 
-export type StartAttemptBody = z.infer<typeof startAttemptBodySchema>;
-
 export const attemptIdParamSchema = z.object({
   attemptId: z.string().trim().min(1, "Thiếu mã lượt làm bài."),
 });
@@ -32,8 +30,6 @@ export type ToggleFlagBody = z.infer<typeof toggleFlagBodySchema>;
 export const setProgressBodySchema = z.object({
   lastQuestionPosition: z.coerce.number().int().min(1).max(1000),
 });
-
-export type SetProgressBody = z.infer<typeof setProgressBodySchema>;
 
 /** Snapshot lựa chọn an toàn để trả về client (không chứa đáp án đúng). */
 export const snapshotOptionSchema = z.object({

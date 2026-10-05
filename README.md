@@ -162,6 +162,14 @@ Quy ước chính:
 Trang người dùng: `/` (trang chủ, môn học, đề nổi bật), `/de-thi` (duyệt & lọc đề),
 `/de-thi/[examId]` (chi tiết đề), `/lam-bai/[attemptId]` (phòng thi), `/ket-qua/[attemptId]` (kết quả).
 
+Hai trang kho đề (`/de-thi`, `/de-thi/[examId]`) là **Server Component đọc trực tiếp service**
+(`listSubjects`, `listExams`, `getExamById`) chứ không gọi vòng qua HTTP nội bộ: dữ liệu được render
+sẵn trong HTML rồi truyền xuống client component qua `initialData` (kèm `staleTime` 30 giây để không
+fetch lặp ngay khi mount). Bộ lọc/phân trang vẫn nằm trên URL (`router.push`) và chỉ khi người dùng
+đổi bộ lọc thì client mới gọi `/api/exams` — vì vậy route handler vẫn cần cho điều hướng phía client
+và cho `test:e2e`. Khi DB tắt, truy vấn phía server được bọc bằng `Promise.allSettled` / `catch` nên
+trang vẫn trả `200` và client tự thử lại rồi hiển thị `ErrorBlock`.
+
 ## Luật nghiệp vụ quan trọng
 
 1. **Ẩn danh bằng cookie.** Lần gọi API đầu tiên sẽ tạo cookie phiên httpOnly; mọi lượt làm bài
@@ -184,6 +192,14 @@ Trang người dùng: `/` (trang chủ, môn học, đề nổi bật), `/de-thi
    mà `@prisma/adapter-pg` gói trong `PrismaClientKnownRequestError`, cùng các SQLSTATE nhóm `08`,
    `3D000` (database chưa tồn tại) và `28P01` (sai mật khẩu). `ErrorBlock` nhận diện mã này và in
    hướng dẫn thiết lập PostgreSQL bằng tiếng Việt thay vì lỗi chung chung.
+8. **Chỉ hỗ trợ `SINGLE_CHOICE`.** Enum `QuestionType` đã dự trù `TRUE_FALSE` / `SHORT_ANSWER` nhưng
+   Phase này chỉ dùng câu chọn một đáp án đúng: seed ép `type = SINGLE_CHOICE` và dừng nếu một câu
+   không có **đúng một** lựa chọn đúng. Loại câu khác chưa được giao diện phòng thi hay phần chấm
+   điểm hỗ trợ (`gradeQuestion` so khớp đúng một `selectedOptionId`), nên không được thêm vào đề đã
+   xuất bản.
+9. **Lịch sử làm bài theo cookie.** Phase này cố ý giữ ẩn danh: chưa có trang lịch sử và chưa có tài
+   khoản. Mọi lượt làm bài chỉ gắn với cookie phiên httpOnly của trình duyệt; xoá cookie là mất dấu
+   các lượt cũ.
 
 ## Kiểm thử
 
@@ -269,6 +285,20 @@ Ngoài ra, đã chạy `next start` trên cổng 3123 để kiểm tra **cả ha
 Vì DB đã sẵn sàng, toàn bộ luồng chạy bằng dữ liệu thật: duyệt đề → vào phòng thi → lưu đáp án/gắn cờ
 → nộp bài → xem điểm và lời giải. Khi DB tắt, API trở lại `503 DATABASE_UNAVAILABLE` và giao diện hiển
 thị khối hướng dẫn thay vì trắng trang.
+
+### Kiểm chứng kho đề đọc service ở server (SSR)
+
+Sau khi chuyển `/de-thi` và `/de-thi/[examId]` sang đọc service ngay trên Server Component, đã kiểm
+chứng trên bản build production (`npm run build` + `next start -p 3123`):
+
+| Phép kiểm | Kết quả |
+| --- | --- |
+| Phân loại route khi build | `/de-thi`, `/de-thi/[examId]` là **Dynamic (server-rendered on demand)**; `/` vẫn Static |
+| `GET /de-thi` | `200`; HTML đầu tiên đã chứa **9** id `seed-exam-*` và **9** `seed-subject-*` ⇒ dữ liệu DB do server render, không phải client fetch |
+| `GET /de-thi/seed-exam-tieng-anh-so-1` | `200`; HTML có dữ liệu đề (5 câu, thời lượng, tổng điểm) |
+| `npm run test:e2e` trên server này | 28/28 kiểm tra đạt |
+| `GET /de-thi` khi `DATABASE_URL` trỏ sai cổng | vẫn `200` (không có `seed-exam-*`, client sẽ hiện `ErrorBlock`), còn `/api/exams` trả `503 DATABASE_UNAVAILABLE` |
+| `npm run lint` / `npm run typecheck` / `npm test` sau khi sửa | 0 lỗi / 0 lỗi / 61 test đạt |
 
 ## Bước tiếp theo (gợi ý)
 

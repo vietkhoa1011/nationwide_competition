@@ -3,6 +3,8 @@ import Link from "next/link";
 
 import { ExamBrowser } from "@/features/exams/components/exam-browser";
 import type { ExamListFilters } from "@/features/exams/hooks/use-exams";
+import type { ExamListQuery } from "@/features/exams/schemas/exam.schemas";
+import { listExams, listSubjects } from "@/features/exams/services/exams-service";
 
 export const metadata: Metadata = {
   title: "Kho đề thi — Luyện Thi 2027",
@@ -37,6 +39,19 @@ export default async function ExamListPage({ searchParams }: ExamListPageProps) 
     pageSize: PAGE_SIZE,
   };
 
+  // `listExams` nhận `ExamListQuery` (page/pageSize bắt buộc) nên chốt giá trị mặc định tại đây;
+  // `filters` (page/pageSize tuỳ chọn) vẫn được truyền nguyên trạng xuống client để dựng URL.
+  const query: ExamListQuery = {
+    ...filters,
+    page: filters.page ?? 1,
+    pageSize: filters.pageSize ?? PAGE_SIZE,
+  };
+
+  // Server Component đọc thẳng service (không đi vòng qua HTTP nội bộ) rồi truyền kết quả
+  // xuống client. Nếu DB chưa sẵn sàng, trang vẫn trả 200 và client tự thử lại rồi hiển thị
+  // ErrorBlock — giữ đúng hành vi "DB tắt vẫn có trang hướng dẫn" đã ghi trong README.
+  const [subjects, exams] = await Promise.allSettled([listSubjects(), listExams(query)]);
+
   return (
     <div className="space-y-6">
       <div className="space-y-2">
@@ -53,7 +68,11 @@ export default async function ExamListPage({ searchParams }: ExamListPageProps) 
         </p>
       </div>
 
-      <ExamBrowser filters={filters} />
+      <ExamBrowser
+        filters={filters}
+        initialSubjects={subjects.status === "fulfilled" ? subjects.value : undefined}
+        initialExams={exams.status === "fulfilled" ? exams.value : undefined}
+      />
     </div>
   );
 }

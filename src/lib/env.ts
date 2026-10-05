@@ -42,7 +42,3 @@ export function getServerEnv(): ServerEnv {
   cachedEnv = parsed.data;
   return cachedEnv;
 }
-
-export function isDatabaseConfigured(): boolean {
-  return Boolean(process.env.DATABASE_URL?.trim());
-}

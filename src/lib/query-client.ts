@@ -1,9 +1,8 @@
 import { QueryClient } from "@tanstack/react-query";
 
 /**
- * Cấu hình QueryClient theo hướng dẫn chính thức của TanStack Query cho
- * Next.js App Router: mỗi request phía server có client riêng, phía trình
- * duyệt dùng duy nhất một client.
+ * Cấu hình QueryClient cho phía trình duyệt: `src/app/providers.tsx` tạo một
+ * client cho mỗi lần tải trang và chia sẻ nó cho toàn bộ cây component.
  */
 export function makeQueryClient(): QueryClient {
   return new QueryClient({
@@ -18,17 +17,4 @@ export function makeQueryClient(): QueryClient {
       },
     },
   });
-}
-
-let browserQueryClient: QueryClient | undefined;
-
-export function getQueryClient(): QueryClient {
-  if (typeof window === "undefined") {
-    // Server: luôn tạo client mới cho mỗi request.
-    return makeQueryClient();
-  }
-  if (!browserQueryClient) {
-    browserQueryClient = makeQueryClient();
-  }
-  return browserQueryClient;
 }

@@ -77,6 +77,7 @@ export interface FakeExamRow {
   durationMinutes: number;
   questions: FakeExamQuestion[];
 }
+
 interface AttemptWhere {
   id?: string;
   sessionId?: string;
@@ -168,6 +169,7 @@ export interface FakePrisma {
     input: ((tx: FakePrisma) => Promise<T>) | Promise<unknown>[],
   ) => Promise<T | unknown[]>;
 }
+
 function matches(where: AttemptWhere | undefined, row: FakeAttemptRow): boolean {
   if (!where) {
     return true;
@@ -233,6 +235,7 @@ export function createFakeExam(overrides: Partial<FakeExamRow> = {}): FakeExamRo
     ...overrides,
   };
 }
+
 export function createFakePrisma(exam: FakeExamRow = createFakeExam()): {
   prisma: FakePrisma;
   state: FakePrismaState;
@@ -357,5 +360,3 @@ export function createFakePrisma(exam: FakeExamRow = createFakeExam()): {
 
   return { prisma, state };
 }
-
-

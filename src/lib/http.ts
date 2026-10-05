@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 
-import { AppError, isAppError } from "@/lib/errors";
+import { isAppError } from "@/lib/errors";
 
 export function jsonOk<T>(data: T, init?: ResponseInit): NextResponse {
   return NextResponse.json(data, init);
@@ -69,7 +69,6 @@ function isPrismaConnectionError(error: unknown, depth = 0): boolean {
   return cause !== undefined && cause !== error && isPrismaConnectionError(cause, depth + 1);
 }
 
-
 export function handleRouteError(error: unknown): NextResponse {
   if (isAppError(error)) {
     return jsonError(error.code, error.message, error.status, error.details);
@@ -98,14 +97,3 @@ export function toQueryObject(searchParams: URLSearchParams): Record<string, str
   }
   return result;
 }
-
-export function zodIssueMessage(error: ZodError): string {
-  return error.issues
-    .map((issue) => {
-      const path = issue.path.join(".");
-      return path ? `${path}: ${issue.message}` : issue.message;
-    })
-    .join("; ");
-}
-
-export { AppError };
