@@ -66,6 +66,38 @@ export interface SetProgressResultDto {
   savedAt: string;
 }
 
+/**
+ * Một dòng trong lịch sử làm bài. Điểm và số câu đúng/sai chỉ có sau khi bài
+ * được chốt (đã nộp hoặc hết giờ) nên đều là `null` khi còn đang làm.
+ */
+export interface AttemptHistoryItemDto {
+  attemptId: string;
+  examId: string;
+  examTitle: string;
+  subjectName: string;
+  status: AttemptStatusValue;
+  startedAt: string;
+  expiresAt: string;
+  submittedAt: string | null;
+  questionCount: number;
+  lastQuestionPosition: number;
+  score: number | null;
+  maxScore: number | null;
+  correctCount: number | null;
+  incorrectCount: number | null;
+  unansweredCount: number | null;
+  /** Server quyết định còn làm tiếp được hay không (chưa nộp và chưa hết giờ). */
+  canResume: boolean;
+}
+
+export interface AttemptHistoryDto {
+  items: AttemptHistoryItemDto[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
 export interface ResultQuestionDto {
   questionId: string;
   position: number;

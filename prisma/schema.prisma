@@ -36,6 +36,18 @@ enum AttemptStatus {
   EXPIRED
 }
 
+enum UserRole {
+  STUDENT
+  TEACHER
+  ADMIN
+}
+
+enum TeacherApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 model Subject {
   id          String   @id @default(cuid())
   name        String   @unique
@@ -46,9 +58,10 @@ model Subject {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  topics    Topic[]
-  questions Question[]
-  exams     Exam[]
+  topics              Topic[]
+  questions           Question[]
+  exams               Exam[]
+  teacherApplications TeacherApplication[]
 
   @@index([position])
 }
@@ -145,9 +158,12 @@ model ExamQuestion {
 }
 
 model Attempt {
-  id        String @id @default(cuid())
-  // Định danh phiên luyện thi ẩn danh (cookie httpOnly, giá trị ngẫu nhiên 256-bit).
+  id        String  @id @default(cuid())
+  // Định danh phiên: là id phiên đăng nhập (Better Auth) của chủ lượt làm bài, hoặc
+  // cookie ẩn danh `luyenthi_session` của các lượt làm bài cũ trước khi có tài khoản.
   sessionId String
+  // Chủ lượt làm bài. Lượt làm bài ẩn danh cũ (trước khi có tài khoản) giữ giá trị NULL.
+  userId    String?
   examId    String
 
   status               AttemptStatus @default(IN_PROGRESS)
@@ -165,12 +181,16 @@ model Attempt {
   updatedAt            DateTime      @updatedAt
 
   exam    Exam            @relation(fields: [examId], references: [id], onDelete: Cascade)
+  user    User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
   answers AttemptAnswer[]
 
   @@index([sessionId])
   @@index([examId])
   @@index([sessionId, examId, status])
   @@index([status, expiresAt])
+  // Lịch sử làm bài của một người dùng (sắp xếp mới nhất trước).
+  @@index([userId, startedAt])
+  @@index([userId, examId, status])
 }
 
 model AttemptAnswer {
@@ -206,4 +226,129 @@ model AttemptAnswer {
   @@index([attemptId])
   @@index([questionId])
   @@index([selectedOptionId])
+}
+
+// ---------------------------------------------------------------------------
+// Xác thực người dùng (Better Auth 1.7 + Prisma adapter).
+// Cột/thuộc tính của 5 model dưới đây phải khớp đúng bảng mà Better Auth mong đợi
+// (`getExpectedSchema`); adapter còn tự kiểm tra schema lúc chạy và sẽ báo lỗi rõ
+// ràng nếu thiếu bảng/cột. Vì vậy mọi cột Better Auth có thể không ghi đều phải
+// nullable hoặc có giá trị mặc định.
+// ---------------------------------------------------------------------------
+
+model User {
+  // Better Auth tự sinh id (chuỗi 32 ký tự) nên cột này không dùng @default.
+  id            String  @id
+  name          String
+  email         String  @unique
+  emailVerified Boolean @default(false)
+  image         String?
+
+  // Vai trò & trạng thái khoá tài khoản. `input: false` phía Better Auth nghĩa là
+  // client KHÔNG thể tự gửi các trường này lên khi đăng ký/đăng nhập.
+  role      UserRole  @default(STUDENT)
+  banned    Boolean   @default(false)
+  banReason String?
+  bannedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions             Session[]
+  accounts             Account[]
+  attempts             Attempt[]
+  teacherApplications  TeacherApplication[] @relation("TeacherApplicationOwner")
+  reviewedApplications TeacherApplication[] @relation("TeacherApplicationReviewer")
+
+  @@index([role])
+  @@index([banned])
+}
+
+model Session {
+  id        String   @id
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  userId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  // Băm mật khẩu scrypt do Better Auth sinh ra (không bao giờ trả về qua API).
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+}
+
+/**
+ * Bộ đếm giới hạn tần suất (chống dò mật khẩu). `lastRequest` là mốc thời gian
+ * `Date.now()` (mili giây) nên dùng Float: Better Auth truyền vào một số JS và
+ * cột BigInt của Prisma chỉ nhận BigInt, còn Float lưu chính xác giá trị này.
+ */
+model RateLimit {
+  id          String @id
+  key         String @unique
+  count       Int
+  lastRequest Float
+}
+
+/**
+ * Đơn xin quyền giáo viên. `pendingKey` = userId khi đơn đang PENDING và NULL khi
+ * đã xử lý; nhờ vậy ràng buộc UNIQUE của database chặn tuyệt đối việc nộp trùng
+ * nhiều đơn đang chờ, trong khi một người vẫn có thể nộp lại sau khi bị từ chối.
+ */
+model TeacherApplication {
+  id              String                   @id @default(cuid())
+  userId          String
+  status          TeacherApplicationStatus @default(PENDING)
+  pendingKey      String?                  @unique
+  school          String?
+  subjectId       String?
+  experienceYears Int?
+  contactPhone    String?
+  motivation      String
+  reviewNote      String?
+  reviewedById    String?
+  reviewedAt      DateTime?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+
+  user       User     @relation("TeacherApplicationOwner", fields: [userId], references: [id], onDelete: Cascade)
+  subject    Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  reviewedBy User?    @relation("TeacherApplicationReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
 }

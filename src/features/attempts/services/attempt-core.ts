@@ -22,9 +22,22 @@ import { roundScore } from "./grading";
  * Module này KHÔNG import Prisma hay Next.js nên có thể kiểm thử trực tiếp.
  */
 
+/**
+ * Người đang thao tác với lượt làm bài: học sinh đã đăng nhập (`userId`) hoặc
+ * khách ẩn danh chỉ có cookie phiên (`userId = null`).
+ *
+ * Cấu trúc này khớp với `AttemptOwner` trong `@/lib/auth/session` để tầng route
+ * truyền thẳng xuống service mà không cần chuyển đổi.
+ */
+export interface AttemptOwnerRef {
+  sessionId: string;
+  userId: string | null;
+}
+
 export interface AttemptTimingRow {
   id: string;
   sessionId: string;
+  userId?: string | null;
   status: AttemptStatusValue;
   startedAt: Date;
   expiresAt: Date;
@@ -92,14 +105,30 @@ export function resolveEffectiveStatus(
 }
 
 /**
- * Kiểm tra lượt làm bài thuộc phiên hiện tại.
- * Trả về 404 (thay vì 403) để không tiết lộ sự tồn tại của lượt làm bài của phiên khác.
+ * Kiểm tra lượt làm bài thuộc về người đang gọi.
+ *
+ * - Đã đăng nhập: lượt phải có `userId` trùng với người gọi.
+ * - Khách ẩn danh: chỉ thấy lượt KHÔNG gắn `userId` và có `sessionId` trùng cookie.
+ *
+ * Lượt làm khi còn ẩn danh vì vậy không tự động "theo" tài khoản sau khi đăng nhập,
+ * và ngược lại lượt của tài khoản không lộ ra cho khách cùng trình duyệt.
+ *
+ * Trả về 404 (thay vì 403) để không tiết lộ sự tồn tại của lượt làm bài của người khác.
  */
 export function assertAttemptOwnership(
-  attempt: { sessionId: string },
-  sessionId: string | null | undefined,
+  attempt: Pick<AttemptTimingRow, "sessionId" | "userId">,
+  owner: AttemptOwnerRef | null | undefined,
 ): void {
-  if (!sessionId || attempt.sessionId !== sessionId) {
+  const attemptUserId = attempt.userId ?? null;
+
+  const ownedByUser = owner != null && owner.userId !== null && attemptUserId === owner.userId;
+  const ownedByGuestSession =
+    owner != null &&
+    owner.userId === null &&
+    attemptUserId === null &&
+    attempt.sessionId === owner.sessionId;
+
+  if (!ownedByUser && !ownedByGuestSession) {
     throw new AppError("ATTEMPT_NOT_FOUND", "Không tìm thấy lượt làm bài.", 404);
   }
 }

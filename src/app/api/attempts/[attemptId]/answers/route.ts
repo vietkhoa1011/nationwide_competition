@@ -4,8 +4,8 @@ import {
   saveAnswerBodySchema,
 } from "@/features/attempts/schemas/attempt.schemas";
 import { deleteAnswer, saveAnswer } from "@/features/attempts/services/attempts-service";
+import { resolveAttemptOwner } from "@/lib/auth/session";
 import { handleRouteError, jsonOk, toQueryObject } from "@/lib/http";
-import { requireSessionId } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -18,8 +18,8 @@ export async function PUT(
     const { attemptId } = attemptIdParamSchema.parse(await context.params);
     const payload = await request.json().catch(() => null);
     const body = saveAnswerBodySchema.parse(payload);
-    const sessionId = await requireSessionId();
-    const result = await saveAnswer(sessionId, attemptId, body);
+    const owner = await resolveAttemptOwner();
+    const result = await saveAnswer(owner, attemptId, body);
     return jsonOk(result);
   } catch (error) {
     return handleRouteError(error);
@@ -36,8 +36,8 @@ export async function DELETE(
     const { questionId } = deleteAnswerQuerySchema.parse(
       toQueryObject(new URL(request.url).searchParams),
     );
-    const sessionId = await requireSessionId();
-    const result = await deleteAnswer(sessionId, attemptId, questionId);
+    const owner = await resolveAttemptOwner();
+    const result = await deleteAnswer(owner, attemptId, questionId);
     return jsonOk(result);
   } catch (error) {
     return handleRouteError(error);

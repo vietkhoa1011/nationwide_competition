@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { UserMenu } from "@/components/layout/user-menu";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -25,27 +26,32 @@ export function SiteHeader() {
           </span>
         </Link>
 
-        <nav className="flex items-center gap-1" aria-label="Điều hướng chính">
-          {navItems.map((item) => {
-            const isActive =
-              item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+        <div className="flex items-center gap-2 sm:gap-3">
+          <nav className="flex items-center gap-1" aria-label="Điều hướng chính">
+            {navItems.map((item) => {
+              const isActive =
+                item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
 
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  "rounded-xl px-3 py-2 text-sm font-semibold transition-colors",
-                  isActive
-                    ? "bg-sky-50 text-sky-700"
-                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
-                )}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn(
+                    "rounded-xl px-3 py-2 text-sm font-semibold transition-colors",
+                    isActive
+                      ? "bg-sky-50 text-sky-700"
+                      : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+                  )}
+                >
+                  {item.label}
+                </Link>
+              );
+            })}
+          </nav>
+
+          {/* `key` theo pathname: menu tự đóng khi điều hướng (component được remount). */}
+          <UserMenu key={pathname} />
+        </div>
       </div>
     </header>
   );

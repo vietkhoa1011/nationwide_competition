@@ -30,6 +30,10 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# log/pid khi chạy dev trên máy (dev.out.log, dev.err.log, dev.pid…)
+/*.log
+/*.pid
+
 # env files (can opt-in for committing if needed)
 .env*
 !.env.example

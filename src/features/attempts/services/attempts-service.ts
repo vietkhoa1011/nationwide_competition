@@ -5,6 +5,7 @@ import { AppError } from "@/lib/errors";
 import { getPrisma } from "@/lib/prisma";
 
 import type {
+  AttemptHistoryQuery,
   SaveAnswerBody,
   ToggleFlagBody,
 } from "@/features/attempts/schemas/attempt.schemas";
@@ -19,11 +20,13 @@ import {
   serializeStudentAttempt,
   toCorrectOptionIds,
   toStudentOptions,
+  type AttemptOwnerRef,
   type AttemptTimingRow,
   type SerializableAttemptRow,
 } from "@/features/attempts/services/attempt-core";
-import { gradeAttempt } from "@/features/attempts/services/grading";
+import { gradeAttempt, roundScore } from "@/features/attempts/services/grading";
 import type {
+  AttemptHistoryDto,
   AttemptResultDto,
   AttemptStatusValue,
   SaveAnswerResultDto,
@@ -35,13 +38,15 @@ import type {
 
 /**
  * Toàn bộ truy vấn dữ liệu lượt làm bài. Mọi thao tác sửa đáp án đều kiểm tra
- * quyền sở hữu theo phiên và trạng thái thời gian ngay trên server — client
- * không được tin tưởng về giờ giấc hay đáp án đúng.
+ * quyền sở hữu (theo `userId` khi đã đăng nhập, theo cookie phiên khi ẩn danh) và
+ * trạng thái thời gian ngay trên server — client không được tin tưởng về giờ giấc
+ * hay đáp án đúng.
  */
 
 const attemptRowSelect = {
   id: true,
   sessionId: true,
+  userId: true,
   examId: true,
   status: true,
   startedAt: true,
@@ -153,12 +158,14 @@ async function finalizeAttempt(
 }
 
 /**
- * Bắt đầu làm bài. Nếu phiên hiện tại đang có lượt làm bài chưa nộp và còn hạn
+ * Bắt đầu làm bài. Nếu người gọi đang có lượt làm bài chưa nộp và còn hạn
  * thì trả về chính lượt đó (`resumed: true`) thay vì tạo lượt mới, nhờ vậy thao
  * tác này an toàn khi người dùng bấm nhiều lần hoặc tải lại trang.
+ *
+ * Lượt đang dở được tìm theo `userId` khi đã đăng nhập, theo cookie phiên khi ẩn danh.
  */
 export async function startAttempt(
-  sessionId: string,
+  owner: AttemptOwnerRef,
   examId: string,
 ): Promise<StartAttemptResultDto> {
   const prisma = getPrisma();
@@ -207,7 +214,15 @@ export async function startAttempt(
   const now = new Date();
 
   const existing = await prisma.attempt.findFirst({
-    where: { sessionId, examId: exam.id, status: "IN_PROGRESS" },
+    where: {
+      examId: exam.id,
+      status: "IN_PROGRESS",
+      // Khách ẩn danh chỉ tiếp tục lượt của chính mình: lượt của tài khoản (userId khác null)
+      // không được "nhận" nhầm sau khi đăng xuất khỏi trình duyệt dùng chung.
+      ...(owner.userId !== null
+        ? { userId: owner.userId }
+        : { sessionId: owner.sessionId, userId: null }),
+    },
     orderBy: { startedAt: "desc" },
     select: { id: true, startedAt: true, expiresAt: true },
   });
@@ -237,7 +252,8 @@ export async function startAttempt(
   const attemptId = await prisma.$transaction(async (tx) => {
     const attempt = await tx.attempt.create({
       data: {
-        sessionId,
+        sessionId: owner.sessionId,
+        userId: owner.userId,
         examId: exam.id,
         status: "IN_PROGRESS",
         startedAt,
@@ -295,19 +311,103 @@ export async function startAttempt(
   };
 }
 
+/** Trường dùng cho một dòng lịch sử: không kèm đáp án đúng hay lời giải. */
+const attemptHistorySelect = {
+  id: true,
+  examId: true,
+  status: true,
+  startedAt: true,
+  expiresAt: true,
+  submittedAt: true,
+  score: true,
+  maxScore: true,
+  correctCount: true,
+  incorrectCount: true,
+  unansweredCount: true,
+  lastQuestionPosition: true,
+  exam: { select: { title: true, subject: { select: { name: true } } } },
+  _count: { select: { answers: true } },
+} as const;
+
+/**
+ * Lịch sử làm bài của người đang gọi, mới nhất trước.
+ *
+ * Cùng quy tắc cô lập như mọi thao tác khác: đã đăng nhập thì lấy theo `userId`
+ * (thấy được bài làm trên mọi thiết bị), khách ẩn danh chỉ lấy lượt có
+ * `sessionId` trùng cookie và chưa gắn tài khoản nào.
+ *
+ * `owner` là `null` khi người truy cập chưa từng có cookie phiên (Server Component
+ * không được ghi cookie): khi đó chắc chắn chưa có lượt làm bài nào nên trả trang rỗng
+ * thay vì chạm vào database.
+ */
+export async function listAttemptHistory(
+  owner: AttemptOwnerRef | null,
+  query: AttemptHistoryQuery,
+): Promise<AttemptHistoryDto> {
+  const { page, pageSize } = query;
+
+  if (!owner) {
+    return { items: [], page, pageSize, total: 0, totalPages: 0 };
+  }
+
+  const prisma = getPrisma();
+  const now = new Date();
+
+  const where: Prisma.AttemptWhereInput =
+    owner.userId !== null
+      ? { userId: owner.userId }
+      : { sessionId: owner.sessionId, userId: null };
+
+  const [total, attempts] = await prisma.$transaction([
+    prisma.attempt.count({ where }),
+    prisma.attempt.findMany({
+      where,
+      orderBy: { startedAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      select: attemptHistorySelect,
+    }),
+  ]);
+
+  return {
+    items: attempts.map((attempt) => ({
+      attemptId: attempt.id,
+      examId: attempt.examId,
+      examTitle: attempt.exam.title,
+      subjectName: attempt.exam.subject.name,
+      status: resolveEffectiveStatus(attempt.status, attempt.expiresAt, now),
+      startedAt: attempt.startedAt.toISOString(),
+      expiresAt: attempt.expiresAt.toISOString(),
+      submittedAt: attempt.submittedAt?.toISOString() ?? null,
+      questionCount: attempt._count.answers,
+      lastQuestionPosition: attempt.lastQuestionPosition,
+      score: attempt.score === null ? null : roundScore(attempt.score),
+      maxScore: attempt.maxScore === null ? null : roundScore(attempt.maxScore),
+      correctCount: attempt.correctCount,
+      incorrectCount: attempt.incorrectCount,
+      unansweredCount: attempt.unansweredCount,
+      canResume: attempt.status === "IN_PROGRESS" && !isDeadlinePassed(attempt.expiresAt, now),
+    })),
+    page,
+    pageSize,
+    total,
+    totalPages: total === 0 ? 0 : Math.ceil(total / pageSize),
+  };
+}
+
 /**
  * Khôi phục lượt làm bài đang dang dở sau khi tải lại trang.
  * Payload KHÔNG chứa đáp án đúng hay lời giải.
  */
 export async function getCurrentAttempt(
-  sessionId: string,
+  owner: AttemptOwnerRef,
   attemptId: string,
 ): Promise<StudentAttemptDto> {
   const prisma = getPrisma();
   const now = new Date();
 
   let attempt = await requireAttemptRow(attemptId);
-  assertAttemptOwnership(attempt, sessionId);
+  assertAttemptOwnership(attempt, owner);
 
   if (attempt.status === "IN_PROGRESS" && isDeadlinePassed(attempt.expiresAt, now)) {
     // Hết giờ trong lúc người dùng không thao tác: chốt bài và chấm điểm ngay.
@@ -326,26 +426,34 @@ export async function getCurrentAttempt(
 async function loadEditableAttempt(
   tx: Prisma.TransactionClient,
   attemptId: string,
-  sessionId: string,
+  owner: AttemptOwnerRef,
   now: Date,
 ): Promise<AttemptTimingRow> {
   const attempt = await tx.attempt.findUnique({
     where: { id: attemptId },
-    select: { id: true, sessionId: true, status: true, startedAt: true, expiresAt: true, submittedAt: true },
+    select: {
+      id: true,
+      sessionId: true,
+      userId: true,
+      status: true,
+      startedAt: true,
+      expiresAt: true,
+      submittedAt: true,
+    },
   });
 
   if (!attempt) {
     throw new AppError("ATTEMPT_NOT_FOUND", "Không tìm thấy lượt làm bài.", 404);
   }
 
-  assertAttemptOwnership(attempt, sessionId);
+  assertAttemptOwnership(attempt, owner);
   assertAnswersEditable(attempt, now);
   return attempt;
 }
 
 /** Lưu đáp án chọn cho một câu hỏi (optionId = null nghĩa là xoá đáp án). */
 export async function saveAnswer(
-  sessionId: string,
+  owner: AttemptOwnerRef,
   attemptId: string,
   input: SaveAnswerBody,
 ): Promise<SaveAnswerResultDto> {
@@ -353,7 +461,7 @@ export async function saveAnswer(
   const now = new Date();
 
   return prisma.$transaction(async (tx) => {
-    await loadEditableAttempt(tx, attemptId, sessionId, now);
+    await loadEditableAttempt(tx, attemptId, owner, now);
 
     const answer = await tx.attemptAnswer.findFirst({
       where: { attemptId, questionId: input.questionId },
@@ -393,16 +501,16 @@ export async function saveAnswer(
 }
 
 export function deleteAnswer(
-  sessionId: string,
+  owner: AttemptOwnerRef,
   attemptId: string,
   questionId: string,
 ): Promise<SaveAnswerResultDto> {
-  return saveAnswer(sessionId, attemptId, { questionId, optionId: null });
+  return saveAnswer(owner, attemptId, { questionId, optionId: null });
 }
 
 /** Đánh dấu / bỏ đánh dấu một câu hỏi để xem lại. */
 export async function toggleFlag(
-  sessionId: string,
+  owner: AttemptOwnerRef,
   attemptId: string,
   input: ToggleFlagBody,
 ): Promise<ToggleFlagResultDto> {
@@ -410,7 +518,7 @@ export async function toggleFlag(
   const now = new Date();
 
   return prisma.$transaction(async (tx) => {
-    await loadEditableAttempt(tx, attemptId, sessionId, now);
+    await loadEditableAttempt(tx, attemptId, owner, now);
 
     const answer = await tx.attemptAnswer.findFirst({
       where: { attemptId, questionId: input.questionId },
@@ -437,7 +545,7 @@ export async function toggleFlag(
 
 /** Ghi nhớ "câu đang xem" để khôi phục sau khi tải lại (chỉ là tiện ích giao diện). */
 export async function setProgress(
-  sessionId: string,
+  owner: AttemptOwnerRef,
   attemptId: string,
   lastQuestionPosition: number,
 ): Promise<SetProgressResultDto> {
@@ -447,14 +555,14 @@ export async function setProgress(
   return prisma.$transaction(async (tx) => {
     const attempt = await tx.attempt.findUnique({
       where: { id: attemptId },
-      select: { id: true, sessionId: true, status: true },
+      select: { id: true, sessionId: true, userId: true, status: true },
     });
 
     if (!attempt) {
       throw new AppError("ATTEMPT_NOT_FOUND", "Không tìm thấy lượt làm bài.", 404);
     }
 
-    assertAttemptOwnership(attempt, sessionId);
+    assertAttemptOwnership(attempt, owner);
 
     if (attempt.status !== "IN_PROGRESS") {
       return { lastQuestionPosition, savedAt: now.toISOString() };
@@ -478,29 +586,29 @@ export async function setProgress(
  * khi trạng thái vẫn là IN_PROGRESS, nên điểm chỉ được ghi một lần duy nhất.
  */
 export async function submitAttempt(
-  sessionId: string,
+  owner: AttemptOwnerRef,
   attemptId: string,
 ): Promise<AttemptResultDto> {
   const prisma = getPrisma();
   const now = new Date();
 
   const attempt = await requireAttemptRow(attemptId);
-  assertAttemptOwnership(attempt, sessionId);
+  assertAttemptOwnership(attempt, owner);
 
   await prisma.$transaction((tx) => finalizeAttempt(tx, attempt, now));
 
-  return getAttemptResult(sessionId, attemptId);
+  return getAttemptResult(owner, attemptId);
 }
 
 export async function getAttemptResult(
-  sessionId: string,
+  owner: AttemptOwnerRef,
   attemptId: string,
 ): Promise<AttemptResultDto> {
   const prisma = getPrisma();
   const now = new Date();
 
   let attempt = await requireAttemptRow(attemptId);
-  assertAttemptOwnership(attempt, sessionId);
+  assertAttemptOwnership(attempt, owner);
 
   if (attempt.status === "IN_PROGRESS") {
     if (!isDeadlinePassed(attempt.expiresAt, now)) {

@@ -185,8 +185,8 @@ check(
 
 const noSession = await anonymous(`/api/attempts/${attemptId}`);
 check(
-  "không có cookie phiên → 401 SESSION_MISSING",
-  noSession.status === 401 && noSession.body.error?.code === "SESSION_MISSING",
+  "khách không có cookie → 404 ATTEMPT_NOT_FOUND (phiên mới không sở hữu lượt làm bài)",
+  noSession.status === 404 && noSession.body.error?.code === "ATTEMPT_NOT_FOUND",
   `status=${noSession.status}`,
 );
 

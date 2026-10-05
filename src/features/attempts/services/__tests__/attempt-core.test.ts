@@ -120,21 +120,79 @@ describe("resolveEffectiveStatus", () => {
 });
 
 describe("assertAttemptOwnership", () => {
-  it("cho qua khi phiên trùng khớp", () => {
-    expect(() => assertAttemptOwnership({ sessionId: "session-1" }, "session-1")).not.toThrow();
+  const guest = { sessionId: "session-1", userId: null };
+
+  it("cho qua khi chủ là khách và phiên cookie trùng khớp", () => {
+    expect(() =>
+      assertAttemptOwnership({ sessionId: "session-1", userId: null }, guest),
+    ).not.toThrow();
   });
 
-  it("trả 404 khi phiên khác để không lộ sự tồn tại của lượt làm bài", () => {
+  it("cho qua khi chủ đã đăng nhập và userId trùng khớp", () => {
+    expect(() =>
+      assertAttemptOwnership(
+        { sessionId: "session-1", userId: "user-1" },
+        { sessionId: "auth-session-1", userId: "user-1" },
+      ),
+    ).not.toThrow();
+  });
+
+  it("cho qua khi đăng nhập ở thiết bị khác (cookie khác, cùng tài khoản)", () => {
+    expect(() =>
+      assertAttemptOwnership(
+        { sessionId: "session-1", userId: "user-1" },
+        { sessionId: "cookie-cua-thiet-bi-2", userId: "user-1" },
+      ),
+    ).not.toThrow();
+  });
+
+  it("trả 404 khi người dùng khác mở lượt làm bài của tài khoản khác", () => {
     expectAppError(
-      () => assertAttemptOwnership({ sessionId: "session-1" }, "session-2"),
+      () =>
+        assertAttemptOwnership(
+          { sessionId: "session-1", userId: "user-1" },
+          { sessionId: "auth-session-2", userId: "user-2" },
+        ),
       "ATTEMPT_NOT_FOUND",
       404,
     );
   });
 
-  it("trả 404 khi thiếu phiên", () => {
+  it("trả 404 khi khách ẩn danh mở lượt làm bài của tài khoản", () => {
     expectAppError(
-      () => assertAttemptOwnership({ sessionId: "session-1" }, null),
+      () => assertAttemptOwnership({ sessionId: "session-1", userId: "user-1" }, guest),
+      "ATTEMPT_NOT_FOUND",
+      404,
+    );
+  });
+
+  it("trả 404 khi tài khoản mở lượt làm bài ẩn danh của cùng trình duyệt", () => {
+    expectAppError(
+      () =>
+        assertAttemptOwnership(
+          { sessionId: "session-1", userId: null },
+          { sessionId: "session-1", userId: "user-1" },
+        ),
+      "ATTEMPT_NOT_FOUND",
+      404,
+    );
+  });
+
+  it("trả 404 khi phiên khác để không lộ sự tồn tại của lượt làm bài", () => {
+    expectAppError(
+      () =>
+        assertAttemptOwnership(
+          { sessionId: "session-1", userId: null },
+          { sessionId: "session-2", userId: null },
+        ),
+      "ATTEMPT_NOT_FOUND",
+      404,
+    );
+  });
+
+  it("trả 404 khi thiếu chủ sở hữu", () => {
+    expectAppError(
+      () => assertAttemptOwnership({ sessionId: "session-1", userId: null }, null),
       "ATTEMPT_NOT_FOUND",
       404,
     );

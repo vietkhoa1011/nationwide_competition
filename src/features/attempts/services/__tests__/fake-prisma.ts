@@ -35,6 +35,7 @@ export interface FakeAnswerRow {
 export interface FakeAttemptRow {
   id: string;
   sessionId: string;
+  userId: string | null;
   examId: string;
   status: AttemptStatusValue;
   startedAt: Date;
@@ -46,7 +47,7 @@ export interface FakeAttemptRow {
   incorrectCount: number | null;
   unansweredCount: number | null;
   lastQuestionPosition: number;
-  exam: { id: string; title: string; durationMinutes: number };
+  exam: { id: string; title: string; durationMinutes: number; subject?: { name: string } };
   answers: FakeAnswerRow[];
 }
 
@@ -76,11 +77,14 @@ export interface FakeExamRow {
   status: string;
   durationMinutes: number;
   questions: FakeExamQuestion[];
+  /** Dùng cho lịch sử làm bài (tên môn hiển thị kèm tiêu đề đề thi). */
+  subject?: { name: string };
 }
 
 interface AttemptWhere {
   id?: string;
   sessionId?: string;
+  userId?: string | null;
   examId?: string;
   status?: AttemptStatusValue;
 }
@@ -95,9 +99,35 @@ interface FindArgs<Where> {
   where?: Where;
 }
 
+interface FindManyAttemptArgs {
+  where?: AttemptWhere;
+  orderBy?: { startedAt?: "asc" | "desc" };
+  skip?: number;
+  take?: number;
+}
+
+/** Dòng lịch sử đúng theo `attemptHistorySelect` của service (Prisma trả kèm `_count`). */
+export interface FakeAttemptHistoryRow {
+  id: string;
+  examId: string;
+  status: AttemptStatusValue;
+  startedAt: Date;
+  expiresAt: Date;
+  submittedAt: Date | null;
+  score: number | null;
+  maxScore: number | null;
+  correctCount: number | null;
+  incorrectCount: number | null;
+  unansweredCount: number | null;
+  lastQuestionPosition: number;
+  exam: { title: string; subject: { name: string } };
+  _count: { answers: number };
+}
+
 interface CreateAttemptArgs {
   data: {
     sessionId: string;
+    userId?: string | null;
     examId: string;
     status: AttemptStatusValue;
     startedAt: Date;
@@ -155,6 +185,8 @@ export interface FakePrisma {
   attempt: {
     findFirst: (args: FindArgs<AttemptWhere>) => Promise<FakeAttemptRow | null>;
     findUnique: (args: { where: { id: string } }) => Promise<FakeAttemptRow | null>;
+    findMany: (args: FindManyAttemptArgs) => Promise<FakeAttemptHistoryRow[]>;
+    count: (args: FindArgs<AttemptWhere>) => Promise<number>;
     create: (args: CreateAttemptArgs) => Promise<FakeAttemptRow>;
     update: (args: UpdateAttemptArgs) => Promise<FakeAttemptRow>;
     updateMany: (args: UpdateManyAttemptArgs) => Promise<{ count: number }>;
@@ -178,6 +210,9 @@ function matches(where: AttemptWhere | undefined, row: FakeAttemptRow): boolean 
     return false;
   }
   if (where.sessionId !== undefined && row.sessionId !== where.sessionId) {
+    return false;
+  }
+  if (where.userId !== undefined && row.userId !== where.userId) {
     return false;
   }
   if (where.examId !== undefined && row.examId !== where.examId) {
@@ -205,7 +240,32 @@ function matchesAnswer(where: AnswerWhere | undefined, row: FakeAnswerRow): bool
   return true;
 }
 
-/** Đề thi mẫu: 4 câu hỏi, mỗi câu 1 điểm, đáp án đúng luôn là lựa chọn "opt-b". */
+/** Chuyển dòng nội bộ sang hình dạng mà `attemptHistorySelect` yêu cầu. */
+function toHistoryRow(row: FakeAttemptRow): FakeAttemptHistoryRow {
+  return {
+    id: row.id,
+    examId: row.examId,
+    status: row.status,
+    startedAt: row.startedAt,
+    expiresAt: row.expiresAt,
+    submittedAt: row.submittedAt,
+    score: row.score,
+    maxScore: row.maxScore,
+    correctCount: row.correctCount,
+    incorrectCount: row.incorrectCount,
+    unansweredCount: row.unansweredCount,
+    lastQuestionPosition: row.lastQuestionPosition,
+    exam: {
+      title: row.exam.title,
+      subject: { name: row.exam.subject?.name ?? "Toán" },
+    },
+    _count: { answers: row.answers.length },
+  };
+}
+
+/**
+ * Đề thi mẫu: 4 câu hỏi, mỗi câu 1 điểm, đáp án đúng luôn là lựa chọn "opt-b".
+ */
 export function createFakeExam(overrides: Partial<FakeExamRow> = {}): FakeExamRow {
   const options = [
     { id: "opt-a", label: "A", content: "Đáp án A", position: 1, isCorrect: false },
@@ -219,6 +279,7 @@ export function createFakeExam(overrides: Partial<FakeExamRow> = {}): FakeExamRo
     title: "Đề thi thử môn Toán — số 1",
     status: "PUBLISHED",
     durationMinutes: 50,
+    subject: { name: "Toán" },
     questions: [1, 2, 3, 4].map((position) => ({
       questionId: `question-${position}`,
       position,
@@ -262,10 +323,29 @@ export function createFakePrisma(exam: FakeExamRow = createFakeExam()): {
     attempt: {
       findFirst: async ({ where }) => state.attempts.find((row) => matches(where, row)) ?? null,
       findUnique: async ({ where }) => state.attempts.find((row) => row.id === where.id) ?? null,
+      count: async ({ where }) => state.attempts.filter((row) => matches(where, row)).length,
+      findMany: async ({ where, orderBy, skip, take }) => {
+        // `index` giữ thứ tự tạo làm tiêu chí phụ khi hai lượt có cùng `startedAt`,
+        // nhờ vậy kết quả sắp xếp luôn xác định (mới nhất lên đầu).
+        const rows = state.attempts
+          .map((row, index) => ({ row, index }))
+          .filter((item) => matches(where, item.row));
+
+        if (orderBy?.startedAt === "desc") {
+          rows.sort(
+            (a, b) => b.row.startedAt.getTime() - a.row.startedAt.getTime() || b.index - a.index,
+          );
+        }
+
+        const start = skip ?? 0;
+        const end = take === undefined ? rows.length : start + take;
+        return rows.slice(start, end).map((item) => toHistoryRow(item.row));
+      },
       create: async ({ data }) => {
         const row: FakeAttemptRow = {
           id: `attempt-${state.nextAttemptNumber}`,
           sessionId: data.sessionId,
+          userId: data.userId ?? null,
           examId: data.examId,
           status: data.status,
           startedAt: data.startedAt,
@@ -281,6 +361,7 @@ export function createFakePrisma(exam: FakeExamRow = createFakeExam()): {
             id: state.exam.id,
             title: state.exam.title,
             durationMinutes: state.exam.durationMinutes,
+            subject: state.exam.subject,
           },
           answers: [],
         };

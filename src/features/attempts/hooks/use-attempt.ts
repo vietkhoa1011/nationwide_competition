@@ -5,7 +5,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiClientError, apiClient } from "@/lib/api-client";
 import { queryKeys } from "@/lib/query-keys";
 
+import { DEFAULT_ATTEMPT_HISTORY_PAGE_SIZE } from "@/features/attempts/schemas/attempt.schemas";
 import type {
+  AttemptHistoryDto,
   AttemptResultDto,
   SaveAnswerResultDto,
   SetProgressResultDto,
@@ -150,5 +152,37 @@ export function useAttemptResult(attemptId: string) {
     queryFn: () => apiClient.get<AttemptResultDto>(`/api/attempts/${attemptId}/result`),
     enabled: attemptId.length > 0,
     retry: false,
+  });
+}
+
+export interface AttemptHistoryFilters {
+  page?: number;
+  pageSize?: number;
+}
+
+export function buildAttemptHistoryQueryString(filters: AttemptHistoryFilters): string {
+  const params = new URLSearchParams();
+  params.set("page", String(filters.page ?? 1));
+  params.set("pageSize", String(filters.pageSize ?? DEFAULT_ATTEMPT_HISTORY_PAGE_SIZE));
+  return params.toString();
+}
+
+/**
+ * Lịch sử làm bài. Trang đầu do Server Component nạp sẵn qua `listAttemptHistory`
+ * rồi truyền xuống `initialData`, nên đổi trang chỉ tốn một request cho trang mới.
+ */
+export function useAttemptHistory(
+  filters: AttemptHistoryFilters,
+  initialData?: AttemptHistoryDto,
+) {
+  return useQuery<AttemptHistoryDto, ApiClientError>({
+    queryKey: queryKeys.attemptHistory({ ...filters }),
+    queryFn: () =>
+      apiClient.get<AttemptHistoryDto>(
+        `/api/attempts?${buildAttemptHistoryQueryString(filters)}`,
+      ),
+    initialData,
+    placeholderData: (previous) => previous,
+    staleTime: 30_000,
   });
 }
