@@ -1,0 +1,29 @@
+# PostgreSQL local cho "Luyện Thi 2027".
+# Chạy: docker compose up -d
+# Dừng: docker compose down      (dữ liệu vẫn còn trong named volume)
+# Xoá cả dữ liệu: docker compose down -v
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: luyenthi2027-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: luyenthi
+      POSTGRES_PASSWORD: luyenthi
+      POSTGRES_DB: luyenthi2027
+    ports:
+      # Cổng 5432 trên máy dev này đã bị PostgreSQL 17 bản native chiếm (service postgresql-x64-17),
+      # nên container dùng 5433 để dữ liệu dự án tách biệt hoàn toàn.
+      # Muốn đổi cổng: sửa POSTGRES_PORT trong .env (và DATABASE_URL cho khớp).
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - luyenthi2027-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U luyenthi -d luyenthi2027"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  luyenthi2027-db-data:
+    name: luyenthi2027-db-data

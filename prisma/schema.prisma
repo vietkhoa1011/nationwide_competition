@@ -1,0 +1,209 @@
+// Schema Prisma cho "Luyện Thi 2027".
+// Phiên bản đầu chỉ hỗ trợ câu hỏi chọn một đáp án đúng (SINGLE_CHOICE),
+// nhưng đã dự trù QuestionType cho TRUE_FALSE / SHORT_ANSWER.
+// Chạy: npx prisma generate && npx prisma migrate dev
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum QuestionLevel {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum QuestionType {
+  SINGLE_CHOICE
+  TRUE_FALSE
+  SHORT_ANSWER
+}
+
+enum ExamStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum AttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  EXPIRED
+}
+
+model Subject {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  accentColor String?
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  topics    Topic[]
+  questions Question[]
+  exams     Exam[]
+
+  @@index([position])
+}
+
+model Topic {
+  id        String   @id @default(cuid())
+  name      String
+  subjectId String
+  createdAt DateTime @default(now())
+
+  subject   Subject    @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  questions Question[]
+
+  @@unique([subjectId, name])
+  @@index([subjectId])
+}
+
+model Question {
+  id          String        @id @default(cuid())
+  subjectId   String
+  topicId     String?
+  type        QuestionType  @default(SINGLE_CHOICE)
+  level       QuestionLevel @default(MEDIUM)
+  content     String
+  explanation String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  subject        Subject          @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  topic          Topic?           @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  options        QuestionOption[]
+  examQuestions  ExamQuestion[]
+  attemptAnswers AttemptAnswer[]
+
+  @@index([subjectId])
+  @@index([topicId])
+  @@index([type])
+}
+
+model QuestionOption {
+  id         String   @id @default(cuid())
+  questionId String
+  label      String
+  content    String
+  isCorrect  Boolean  @default(false)
+  position   Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  question       Question        @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  attemptAnswers AttemptAnswer[]
+
+  @@unique([questionId, label])
+  @@index([questionId])
+}
+
+model Exam {
+  id              String     @id @default(cuid())
+  title           String
+  slug            String     @unique
+  description     String?
+  subjectId       String
+  durationMinutes Int
+  status          ExamStatus @default(DRAFT)
+  year            Int?
+  isFeatured      Boolean    @default(false)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  subject   Subject        @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  questions ExamQuestion[]
+  attempts  Attempt[]
+
+  @@index([subjectId])
+  @@index([status])
+  @@index([isFeatured])
+  @@index([status, isFeatured])
+}
+
+model ExamQuestion {
+  id         String   @id @default(cuid())
+  examId     String
+  questionId String
+  position   Int
+  points     Float    @default(1)
+  createdAt  DateTime @default(now())
+
+  exam     Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [questionId], references: [id], onDelete: Restrict)
+
+  @@unique([examId, questionId])
+  @@unique([examId, position])
+  @@index([examId])
+  @@index([questionId])
+}
+
+model Attempt {
+  id        String @id @default(cuid())
+  // Định danh phiên luyện thi ẩn danh (cookie httpOnly, giá trị ngẫu nhiên 256-bit).
+  sessionId String
+  examId    String
+
+  status               AttemptStatus @default(IN_PROGRESS)
+  startedAt            DateTime      @default(now())
+  expiresAt            DateTime
+  submittedAt          DateTime?
+  score                Float?
+  maxScore             Float?
+  correctCount         Int?
+  incorrectCount       Int?
+  unansweredCount      Int?
+  // Phục vụ khôi phục "câu đang xem" sau khi reload.
+  lastQuestionPosition Int           @default(1)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  exam    Exam            @relation(fields: [examId], references: [id], onDelete: Cascade)
+  answers AttemptAnswer[]
+
+  @@index([sessionId])
+  @@index([examId])
+  @@index([sessionId, examId, status])
+  @@index([status, expiresAt])
+}
+
+model AttemptAnswer {
+  id               String  @id @default(cuid())
+  attemptId        String
+  questionId       String
+  selectedOptionId String?
+
+  // Snapshot được ghi tại thời điểm bắt đầu bài để việc sửa câu hỏi sau này
+  // không làm thay đổi lượt làm bài đã tạo.
+  snapshotPosition         Int
+  snapshotType             QuestionType
+  snapshotLevel            QuestionLevel
+  snapshotPoints           Float
+  snapshotContent          String
+  snapshotExplanation      String?
+  snapshotOptions          Json
+  snapshotCorrectOptionIds Json
+  snapshotRule             Json?
+
+  isCorrect  Boolean?
+  isFlagged  Boolean   @default(false)
+  answeredAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  attempt        Attempt         @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question       Question        @relation(fields: [questionId], references: [id], onDelete: Restrict)
+  selectedOption QuestionOption? @relation(fields: [selectedOptionId], references: [id], onDelete: SetNull)
+
+  @@unique([attemptId, questionId])
+  @@index([attemptId])
+  @@index([questionId])
+  @@index([selectedOptionId])
+}

@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# prisma client được sinh tự động (chạy `npm run db:generate`)
+/src/generated
+
+/src/generated/prisma

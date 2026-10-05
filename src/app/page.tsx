@@ -1,69 +1,99 @@
-import Image from "next/image";
+import Link from "next/link";
 
-export default function Home() {
+import { ButtonLink } from "@/components/ui/button";
+import { FeaturedExams } from "@/features/exams/components/featured-exams";
+import { SubjectList } from "@/features/exams/components/subject-list";
+
+const steps = [
+  {
+    title: "1. Chọn đề theo môn",
+    description:
+      "Lọc đề thi theo môn học, năm hoặc mức độ nổi bật để bám sát mục tiêu ôn tập.",
+  },
+  {
+    title: "2. Làm bài như thi thật",
+    description:
+      "Đồng hồ đếm ngược do máy chủ quản lý, đáp án được lưu tự động sau mỗi lựa chọn.",
+  },
+  {
+    title: "3. Nhận điểm và lời giải",
+    description:
+      "Nộp bài để xem điểm từng câu, đáp án đúng và lời giải chi tiết cho mọi câu hỏi.",
+  },
+];
+
+export default function HomePage() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div className="space-y-12">
+      <section className="rounded-2xl bg-linear-to-br from-sky-600 to-indigo-700 px-6 py-10 text-white sm:px-10 sm:py-14">
+        <p className="text-xs font-semibold uppercase tracking-widest text-sky-100">
+          Kỳ thi tốt nghiệp THPT 2027
+        </p>
+        <h1 className="mt-3 max-w-2xl text-3xl font-bold leading-tight sm:text-4xl">
+          Luyện đề thử sức — chấm điểm ngay, xem lời giải chi tiết
+        </h1>
+        <p className="mt-3 max-w-2xl text-sm leading-relaxed text-sky-50 sm:text-base">
+          Chọn môn, làm bài trong thời gian như thi thật, hệ thống tự động lưu đáp án và chấm điểm
+          ngay khi bạn nộp.
+        </p>
+        <div className="mt-6 flex flex-wrap gap-3">
+          <ButtonLink
+            href="/de-thi"
+            size="lg"
+            className="bg-blue-600 text-sky-700 hover:bg-sky-50"
+          >
+            Vào kho đề thi
+          </ButtonLink>
+          <ButtonLink
+            href="/de-thi?featured=true"
+            size="lg"
+            className="border-white/40 bg-blue-600 text-white hover:bg-white/10"
+          >
+            Đề nổi bật
+          </ButtonLink>
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <div className="space-y-1">
+          <h2 className="text-xl font-bold text-slate-900">Chọn môn học</h2>
+          <p className="text-sm text-slate-500">
+            Mỗi môn có nhiều đề thi thử theo cấu trúc mới của kỳ thi tốt nghiệp.
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+        <SubjectList />
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex items-end justify-between gap-4">
+          <div className="space-y-1">
+            <h2 className="text-xl font-bold text-slate-900">Đề thi nổi bật</h2>
+            <p className="text-sm text-slate-500">Được chọn lọc cho giai đoạn ôn tập nước rút.</p>
+          </div>
+          <Link
+            href="/de-thi"
+            className="shrink-0 text-sm font-semibold text-sky-700 hover:text-sky-800"
           >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            Xem tất cả →
+          </Link>
         </div>
-      </main>
+        <FeaturedExams />
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-xl font-bold text-slate-900">Cách hoạt động</h2>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {steps.map((step) => (
+            <div
+              key={step.title}
+              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm shadow-slate-200/50"
+            >
+              <h3 className="text-base font-semibold text-slate-900">{step.title}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-slate-600">{step.description}</p>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
