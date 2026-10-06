@@ -1,3 +1,5 @@
+import type { RichDoc } from "@/features/authoring/services/rich-content-core";
+
 export type AttemptStatusValue = "IN_PROGRESS" | "SUBMITTED" | "EXPIRED";
 
 export interface StudentOptionDto {
@@ -5,6 +7,8 @@ export interface StudentOptionDto {
   label: string;
   content: string;
   order: number;
+  /** Bản có cấu trúc của phương án (null với dữ liệu cũ chưa có RichDoc). */
+  contentDoc?: RichDoc | null;
 }
 
 export interface StudentQuestionDto {
@@ -14,6 +18,8 @@ export interface StudentQuestionDto {
   level: string;
   points: number;
   content: string;
+  /** Bản có cấu trúc của nội dung (công thức, danh sách, ảnh) — null với dữ liệu cũ. */
+  contentDoc?: RichDoc | null;
   options: StudentOptionDto[];
   selectedOptionId: string | null;
   isFlagged: boolean;
@@ -104,6 +110,7 @@ export interface ResultQuestionDto {
   type: string;
   level: string;
   content: string;
+  contentDoc?: RichDoc | null;
   points: number;
   earnedPoints: number;
   options: StudentOptionDto[];
@@ -111,6 +118,7 @@ export interface ResultQuestionDto {
   correctOptionIds: string[];
   isCorrect: boolean;
   explanation: string | null;
+  explanationDoc?: RichDoc | null;
 }
 
 export interface AttemptResultDto {
@@ -127,5 +135,12 @@ export interface AttemptResultDto {
   correctCount: number;
   incorrectCount: number;
   unansweredCount: number;
+  /**
+   * true khi lần giao đề của lớp chưa tới mốc được xem đáp án: máy chủ đã loại đáp án
+   * đúng và lời giải khỏi payload (không phải ẩn bằng CSS ở trình duyệt).
+   */
+  answersHidden: boolean;
+  /** Mốc được phép xem đáp án của lần giao đề (null nếu xem ngay sau khi nộp). */
+  answersRevealAt: string | null;
   questions: ResultQuestionDto[];
 }

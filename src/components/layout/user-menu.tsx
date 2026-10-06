@@ -157,14 +157,33 @@ export function UserMenu() {
               Kho đề thi
             </Link>
             {user.role === "STUDENT" ? (
+              <Link role="menuitem" href="/lop-hoc" className={menuItemClassName}>
+                Lớp học của tôi
+              </Link>
+            ) : (
+              <Link role="menuitem" href="/giao-vien" className={menuItemClassName}>
+                Khu vực giáo viên
+              </Link>
+            )}
+            {user.role !== "STUDENT" ? (
+              <Link role="menuitem" href="/giao-vien/lop-hoc" className={menuItemClassName}>
+                Lớp học
+              </Link>
+            ) : null}
+            {user.role === "STUDENT" ? (
               <Link role="menuitem" href="/xin-quyen-giao-vien" className={menuItemClassName}>
                 Xin quyền giáo viên
               </Link>
             ) : null}
             {user.role === "ADMIN" ? (
-              <Link role="menuitem" href="/quan-tri" className={menuItemClassName}>
-                Bảng điều khiển quản trị
-              </Link>
+              <>
+                <Link role="menuitem" href="/quan-tri" className={menuItemClassName}>
+                  Bảng điều khiển quản trị
+                </Link>
+                <Link role="menuitem" href="/quan-tri/de-thi" className={menuItemClassName}>
+                  Quản lý đề thi
+                </Link>
+              </>
             ) : null}
           </div>
 

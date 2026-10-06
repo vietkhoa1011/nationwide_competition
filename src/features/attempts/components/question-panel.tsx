@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/card";
+import { RichContent } from "@/features/content/components/rich-content";
 import { cn } from "@/lib/utils";
 
 import type { StudentQuestionDto } from "@/features/attempts/types";
@@ -59,9 +60,11 @@ export function QuestionPanel({
         </button>
       </div>
 
-      <p className="whitespace-pre-line text-base leading-relaxed text-slate-900">
-        {question.content}
-      </p>
+      <RichContent
+        doc={question.contentDoc}
+        text={question.content}
+        className="text-base text-slate-900"
+      />
 
       <ul className="space-y-2">
         {question.options.map((option) => {
@@ -90,7 +93,12 @@ export function QuestionPanel({
                 >
                   {option.label}
                 </span>
-                <span className="text-sm leading-relaxed text-slate-800">{option.content}</span>
+                <RichContent
+                  doc={option.contentDoc}
+                  text={option.content}
+                  compact
+                  className="text-slate-800"
+                />
               </button>
             </li>
           );

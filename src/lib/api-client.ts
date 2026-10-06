@@ -64,4 +64,38 @@ export const apiClient = {
     }),
   put: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: "PUT", body: JSON.stringify(body ?? {}) }),
+  patch: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: "PATCH", body: JSON.stringify(body ?? {}) }),
+  delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+
+  /**
+   * Tải tệp lên dưới dạng multipart/form-data. Không đặt `Content-Type` để trình duyệt tự
+   * sinh boundary đúng cho phần dữ liệu.
+   */
+  upload: async <T>(path: string, formData: FormData): Promise<T> => {
+    let response: Response;
+    try {
+      response = await fetch(path, { method: "POST", body: formData, cache: "no-store" });
+    } catch {
+      throw new ApiClientError(
+        "Không thể kết nối tới máy chủ. Hãy kiểm tra kết nối mạng.",
+        "NETWORK_ERROR",
+        0,
+      );
+    }
+
+    const body: unknown = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      const errorBody = (body ?? {}) as ApiErrorBody;
+      throw new ApiClientError(
+        errorBody.error?.message ?? "Tải tệp lên không thành công.",
+        errorBody.error?.code ?? "INTERNAL_ERROR",
+        response.status,
+        errorBody.error?.details,
+      );
+    }
+
+    return body as T;
+  },
 };

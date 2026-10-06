@@ -10,6 +10,11 @@ Bên cạnh luồng ẩn danh, hệ thống có **tài khoản người dùng** 
 qua Better Auth), **đơn xin quyền giáo viên** (`STUDENT` → `TEACHER` sau khi quản trị viên duyệt)
 và **bảng điều khiển quản trị** `/quan-tri` để duyệt đơn, khoá/mở khoá tài khoản.
 
+Giáo viên còn có **khu vực tạo & quản lý đề thi** (`/giao-vien`): soạn đề theo ba bước với trình
+soạn thảo có cấu trúc (công thức KaTeX, ảnh tải lên, lưu nháp tự động, kiểm tra trước khi xuất bản),
+quản lý lớp học và giao đề cho lớp; học sinh làm đề của lớp trong mục `/lop-hoc`. Xem mục
+[Tạo và quản lý đề thi](#tạo-và-quản-lý-đề-thi).
+
 ## Công nghệ
 
 | Thành phần | Lựa chọn |
@@ -21,8 +26,11 @@ và **bảng điều khiển quản trị** `/quan-tri` để duyệt đơn, kho
 | Xác thực | Better Auth 1.7 (email + mật khẩu, phiên cookie httpOnly, vai trò `STUDENT`/`TEACHER`/`ADMIN` phía server) |
 | Kiểm tra dữ liệu | Zod 4 |
 | Phiên làm bài ẩn danh | Cookie `luyenthi_session` (httpOnly, sinh ở server) cho khách chưa đăng nhập |
+| Soạn nội dung đề | Tiptap 3 (ProseMirror JSON) — nút tuỳ biến cho công thức và ảnh, lọc nội dung dán vào |
+| Công thức toán | KaTeX 0.19 (`trust: false`, `maxExpand` giới hạn, xuất HTML + MathML) |
+| Ảnh của đề | Tệp trên đĩa (`MEDIA_STORAGE_DIR`, mặc định `storage/uploads`), database chỉ giữ metadata; phục vụ qua `/api/media/[assetId]` sau khi kiểm tra quyền |
 | Giao diện | Tailwind CSS 4 + component tự viết trong `src/components/ui` |
-| Kiểm thử | Vitest 3 (node environment) |
+| Kiểm thử | Vitest 3 (node environment) + script E2E chạy qua HTTP với PostgreSQL thật |
 
 ## Yêu cầu môi trường
 
@@ -163,18 +171,24 @@ src/
   app/                     # App Router: pages + Route Handlers
     api/...                # 21 file route handler / 24 endpoint (xem bảng bên dưới)
   components/ui/           # Button, Card, Feedback (Loading/Error/Empty), Badge, bảng dữ liệu…
-  components/layout/       # site-header, user-menu (đăng nhập/đăng xuất, lối vào /quan-tri)
+  components/layout/       # site-header (thanh đầu trang full-width), user-menu (đăng nhập/đăng xuất, /quan-tri)
   features/auth/           # biểu mẫu đăng nhập/đăng ký, nhãn vai trò, schema dùng chung
   features/exams/          # types, schemas (Zod), hooks (TanStack Query), components, services
   features/attempts/       # types, schemas, hooks, components, services
   features/teacher-applications/  # đơn xin quyền giáo viên: schema, service, hook, panel
   features/admin/          # types, schemas, service, hooks, bảng quản trị (users + đơn)
+  features/authoring/      # soạn đề: schemas, cores (quyền/kiểm tra/nội dung/nhân bản), service,
+                           # hooks, components (trình soạn 3 bước, mục lục, xem trước, lớp, giao đề)
+  features/classroom/      # lớp học & giao đề: schemas, core (cửa sổ làm bài, số lượt), service
+  features/content/        # RichDoc: renderer dùng chung, trình soạn thảo Tiptap, lọc HTML dán vào
+  features/math/           # kiểm tra cú pháp và render công thức LaTeX (KaTeX)
   lib/                     # prisma, auth/ (Better Auth + guard vai trò), session, env, http, errors
   generated/prisma/        # Prisma Client được sinh tự động (không sửa tay)
 scripts/
   create-admin.ts          # npm run db:admin — tạo/nâng quyền tài khoản ADMIN đầu tiên
   e2e-smoke.mjs            # npm run test:e2e — kiểm thử đầu-cuối qua HTTP
   e2e-admin.mjs            # npm run test:e2e:admin — kiểm thử đầu-cuối tài khoản + đơn giáo viên + quản trị
+  e2e-authoring.mjs        # npm run test:e2e:authoring — kiểm thử đầu-cuối tạo/quản lý đề thi + giao đề
 ```
 
 Quy ước chính:
@@ -197,6 +211,181 @@ Quy ước chính:
   `RESULT_NOT_READY`, `QUESTION_NOT_IN_ATTEMPT`, `OPTION_NOT_IN_QUESTION`,
   `TEACHER_APPLICATION_EXISTS`, `TEACHER_APPLICATION_ALREADY_REVIEWED`, `USER_ACTION_NOT_ALLOWED`,
   `DATABASE_UNAVAILABLE`, …).
+- Khung giao diện dùng hết bề ngang màn hình: `header`, `main` và `footer` trong `src/app/layout.tsx`
+  (và phần trong của `src/components/layout/site-header.tsx`) đều `w-full`, **không** còn khung căn
+  giữa giới hạn bề rộng 72rem, chỉ giữ khoảng đệm `px-4 sm:px-6` để chữ không dính mép. Mọi trang
+  (kho đề, làm bài, soạn đề, quản trị) vì thế tận dụng trọn chiều rộng; các cột chữ dài vẫn tự giới
+  hạn bề rộng riêng (`max-w-2xl` / `max-w-3xl`) cho dễ đọc. Hai trang `/dang-nhap` và `/dang-ky` là
+  ngoại lệ có chủ đích: thẻ biểu mẫu nhỏ, căn giữa (`mx-auto max-w-md`).
+
+## Tạo và quản lý đề thi
+
+Khu vực dành cho `TEACHER`/`ADMIN`. Phạm vi đề quyết định mọi thứ:
+
+| Phạm vi đề | Ai tạo/quản lý | Ai truy cập |
+| --- | --- | --- |
+| `PUBLIC` | Chỉ `ADMIN` | Mọi tài khoản đã đăng nhập, sau khi đề được xuất bản |
+| `CLASS` | Giáo viên **phụ trách lớp** sở hữu đề (hoặc `ADMIN`) | Thành viên lớp, khi đề đã xuất bản **và** đã được giao cho lớp |
+
+Quyền không bao giờ đọc từ payload của client: mọi route gọi `requireAuthoringActor()`
+(`TEACHER`/`ADMIN`) rồi service tự kiểm tra `scope`, `classroomId` và chủ lớp đọc từ database. Giáo
+viên **không** tạo được đề `PUBLIC`, không tạo/sửa được đề của lớp mình không phụ trách, không chuyển
+được đề sang `PUBLIC`/lớp khác; học sinh nhận `403` ở mọi endpoint soạn đề.
+
+### Luồng ba bước (trang `/giao-vien/de-thi/[examId]/soan`)
+
+1. **Thông tin đề**: tên, môn, khối, năm, mô tả, hướng dẫn làm bài (có công thức/ảnh) và phạm vi.
+2. **Soạn câu hỏi**: mục lục bên trái (loại câu, điểm, cảnh báo còn thiếu), khu soạn chiếm toàn bộ phần
+   còn lại — bước này không còn cột xem trước nên dành trọn chỗ cho việc soạn thảo. Ô "Nội dung câu
+   hỏi" cao hơn hẳn (13rem) và ô lời giải 9rem để nhìn trọn công thức/ảnh; trên màn hình nhỏ mục lục
+   thành drawer. Có thể thêm, sửa, nhân bản, xoá và đổi thứ tự câu hỏi; mỗi câu có phương án (nhãn
+   A/B/C/D sinh theo thứ tự hiển thị) và lời giải.
+3. **Kiểm tra & xuất bản**: nút "Kiểm tra đề" liệt kê lỗi (chặn xuất bản) và cảnh báo kèm nút nhảy tới
+   đúng câu; sau đó xuất bản nội dung. Với đề lớp, **xuất bản nội dung và giao đề là hai thao tác
+   riêng** — giao đề (lịch mở/đóng, thời lượng ghi đè, số lượt, mốc xem đáp án) nằm ở khối "Giao đề cho
+   lớp" trong cùng bước 3. Bản **xem trước như học sinh** chỉ có ở bước này: đây là nơi duy nhất trong
+   trình soạn hiển thị đề đúng như học sinh thấy.
+
+Thanh hành động được ghim ở đầu khung soạn nên luôn trong tầm tay: **Lưu nháp** (kèm trạng thái đang
+lưu / đã lưu / lưu thất bại và nút thử lại), **Kiểm tra đề**, **Xuất bản**, **Thu hồi**, **Lưu trữ**.
+Không còn nút "Xem trước" trên thanh này — bản xem trước như học sinh nằm cạnh khối xuất bản ở bước 3.
+
+### Nội dung có cấu trúc, công thức và ảnh
+
+- Mọi vùng nội dung (hướng dẫn, câu hỏi, từng phương án, lời giải) lưu dưới dạng
+  `{ schemaVersion: 1, doc: <ProseMirror JSON> }`. Máy chủ chuẩn hoá lại từng nút theo danh sách
+  trắng (`paragraph`, `bulletList`, `orderedList`, `mathInline`, `mathBlock`, `image` cùng các mark
+  đậm/nghiêng/chỉ số trên/dưới) nên không thể lách HTML/script vào đề. Cột `content` chữ thuần vẫn
+  được ghi song song để tương thích dữ liệu cũ.
+- **Công thức** là node chứa nguồn LaTeX (không phải ảnh): bấm vào công thức để sửa. Hộp thoại
+  "Chèn công thức" dành cho người **không viết LaTeX**: bảng công thức chia thành các nhóm bấm được
+  (Phân số–luỹ thừa–căn, Hàm số & giải tích, Lượng giác, Hình học & vectơ, Tổ hợp – Xác suất,
+  Ma trận & hệ phương trình, Ký hiệu & so sánh, Vật lí – Hoá học); mỗi nút đã vẽ sẵn công thức bằng
+  KaTeX kèm tên tiếng Việt nên bấm là chèn ngay vào vị trí con trỏ, và chỗ trống của mẫu được bôi đen để
+  gõ thay. Đoạn đang bôi đen trong ô nguồn được đưa vào chỗ trống của mẫu: bôi `x^2` rồi bấm "Căn bậc
+  hai" sẽ được `\sqrt{x^2}`. Ô nhập LaTeX vẫn còn cho người quen mã, kèm khung xem trước KaTeX tức thì,
+  lựa chọn trong dòng/riêng dòng và thông báo lỗi tiếng Việt. KaTeX chạy `trust: false`, giới hạn macro
+  và độ dài nguồn.
+- **Kiểm tra trước khi xuất bản** chạy lại KaTeX với `throwOnError: true` nên phát hiện được công thức
+  lỗi (thiếu ngoặc, lệnh không hỗ trợ) — không chỉ dựa vào chế độ render không ném lỗi của giao diện.
+  Công thức lỗi khi hiển thị chỉ hiện hộp cảnh báo nhỏ, không làm sập trang; công thức dài cuộn ngang
+  trong khung.
+- **Ảnh**: tải lên qua `POST /api/media` (multipart). Máy chủ nhận dạng loại ảnh bằng chữ ký nhị phân
+  thật (PNG/JPEG/GIF/WEBP), từ chối SVG, chặn tệp quá `MEDIA_MAX_UPLOAD_BYTES` (mặc định 4 MiB), đọc
+  sẵn kích thước và lưu tệp vào `MEDIA_STORAGE_DIR` (không nằm trong `public/`). Nội dung đề chỉ giữ
+  `assetId`; ảnh của đề chưa xuất bản chỉ người soạn đọc được, ảnh của đề lớp chỉ thành viên lớp đọc
+  được. Xoá ảnh khỏi câu hỏi chỉ bỏ node trong tài liệu — tệp vẫn ở kho cho đề khác dùng, và
+  `DELETE /api/media/[assetId]` bị từ chối nếu ảnh còn được tham chiếu (`409 MEDIA_IN_USE`).
+
+### Kiểm tra hợp lệ và vòng đời đề
+
+`validateExamForPublish` (dùng chung cho `POST …/validate` và `POST …/lifecycle`) kiểm tra thông tin bắt
+buộc, sự tồn tại của câu hỏi, nội dung/phương án không rỗng, đúng **một** đáp án đúng cho câu trắc
+nghiệm, điểm hợp lệ, công thức render được, ảnh đã tải xong và **loại câu được hệ thống làm bài/chấm
+điểm hỗ trợ**. Server là nơi quyết định cuối cùng: `POST …/lifecycle` chạy lại toàn bộ kiểm tra rồi mới
+xuất bản, nên không thể xuất bản đề lỗi bằng cách bỏ qua bước kiểm tra ở giao diện.
+
+- `publish` → `PUBLISHED` (ghi `publishedRevision`/`publishedAt`).
+- `unpublish` → `DRAFT`, chỉ khi **chưa** có lượt làm bài nào.
+- `archive` → `ARCHIVED`; điểm và bài làm cũ không đổi.
+- Đề đã phát sinh lượt làm bài bị **khoá toàn bộ chỉnh sửa** (`409 EXAM_CONTENT_LOCKED`) để không làm
+  thay đổi điểm lịch sử (mỗi lượt làm bài còn giữ snapshot riêng trong `AttemptAnswer`). Muốn sửa tiếp
+  thì dùng **Tạo bản sao để chỉnh sửa** (`POST …/duplicate`); bản sao nhận ID mới cho câu và phương án.
+
+### Lưu nháp, autosave và xung đột
+
+Mỗi lần lưu đều tăng `Exam.revision`. Trình soạn thảo gửi kèm số phiên bản đang giữ; lệch phiên bản
+trả `409 EXAM_REVISION_CONFLICT`, giao diện giữ nguyên bản đang nhập và yêu cầu tải lại. Autosave chạy
+1,2 giây sau lần thay đổi cuối và chỉ khi có thay đổi; lỗi mạng giữ nguyên dữ liệu kèm nút "Thử lưu
+lại"; phản hồi của request cũ không bao giờ ghi đè bản mới hơn (mỗi lần lưu mang một số thứ tự riêng,
+cache chỉ nhận phản hồi có `revision` không nhỏ hơn bản đang có). Rời trang khi còn thay đổi chưa lưu
+thì trình duyệt cảnh báo.
+
+### Bảo vệ đáp án và loại câu hỏi
+
+- Payload làm bài (`GET /api/attempts/[attemptId]`) chỉ chứa nội dung + phương án, **không** có
+  `isCorrect`, `correctOptionIds`, lời giải hay quy tắc chấm điểm — việc ẩn diễn ra ở máy chủ, không
+  gửi dữ liệu rồi ẩn bằng CSS/state.
+- Lần giao đề có mốc `revealAnswersAt`: trước mốc đó, `GET /api/attempts/[attemptId]/result` trả
+  `answersHidden: true` và đã loại sẵn đáp án đúng/lời giải khỏi payload.
+- Bản xem trước của người soạn có công tắc "Hiện đáp án và lời giải"; bản xem trước cho học sinh thì
+  không.
+- Bản này chỉ `SINGLE_CHOICE` đi trọn vẹn soạn → lưu → làm bài → chấm điểm. `TRUE_FALSE` và
+  `SHORT_ANSWER` đã có chỗ chứa dữ liệu trong schema (`Question.rule`, `QuestionOption.contentDoc`)
+  nhưng **bị chặn ở máy chủ**: kiểm tra trước xuất bản báo `QUESTION_TYPE_UNSUPPORTED` và
+  `POST /api/attempts` từ chối đề chứa loại câu đó (không chỉ ẩn lựa chọn trên giao diện).
+
+### API của khu vực soạn đề
+
+| Method | Endpoint | Mô tả |
+| --- | --- | --- |
+| `GET` | `/api/authoring/exams` | Đề tôi quản lý (`search`, `status`, `scope`, `classroomId`, `page`, `pageSize`) |
+| `POST` | `/api/authoring/exams` | Tạo đề nháp (phạm vi do máy chủ kiểm tra) |
+| `GET` | `/api/authoring/exams/[examId]` | Chi tiết đề cho người soạn (kèm đáp án và lời giải) |
+| `PATCH` | `/api/authoring/exams/[examId]` | Lưu nháp thông tin đề; gửi `revision` để phát hiện xung đột |
+| `POST` | `/api/authoring/exams/[examId]/questions` | Thêm câu hỏi |
+| `PATCH` / `DELETE` | `/api/authoring/exams/[examId]/questions/[questionId]` | Sửa / xoá câu hỏi |
+| `POST` | `/api/authoring/exams/[examId]/questions/[questionId]/duplicate` | Nhân bản câu hỏi (ID mới, đáp án ánh xạ lại) |
+| `PUT` | `/api/authoring/exams/[examId]/questions/order` | Sắp xếp lại thứ tự câu hỏi |
+| `POST` | `/api/authoring/exams/[examId]/validate` | Kiểm tra đề, trả danh sách lỗi/cảnh báo |
+| `POST` | `/api/authoring/exams/[examId]/lifecycle` | `publish` / `unpublish` / `archive` |
+| `POST` | `/api/authoring/exams/[examId]/duplicate` | Tạo bản sao để chỉnh sửa |
+| `GET` / `POST` | `/api/classrooms` | Lớp học của tôi / tạo lớp |
+| `GET` / `PATCH` | `/api/classrooms/[classroomId]` | Chi tiết lớp kèm thành viên / sửa lớp |
+| `POST` | `/api/classrooms/[classroomId]/members` | Thêm thành viên theo email |
+| `DELETE` | `/api/classrooms/[classroomId]/members/[memberId]` | Xoá thành viên khỏi lớp |
+| `GET` / `POST` | `/api/classrooms/[classroomId]/assignments` | Danh sách / tạo-cập nhật lần giao đề |
+| `PATCH` / `DELETE` | `/api/assignments/[assignmentId]` | Sửa / thu hồi lần giao đề |
+| `GET` | `/api/my/classrooms` | Góc nhìn học sinh: lớp đã tham gia và đề đã được giao |
+| `POST` | `/api/media` | Tải ảnh lên (`multipart/form-data`, trường `file`) |
+| `GET` / `DELETE` | `/api/media/[assetId]` | Phục vụ ảnh sau khi kiểm tra quyền / xoá ảnh khỏi kho |
+
+Trang: `/giao-vien` (bảng làm việc của giáo viên), `/giao-vien/de-thi/[examId]/soan` (trình soạn đề),
+`/giao-vien/lop-hoc` (quản lý lớp), `/quan-tri/de-thi` (quản trị viên quản lý mọi đề), `/lop-hoc` (học
+sinh xem đề được giao).
+
+### Kiểm thử tính năng
+
+```bash
+npm test                     # Vitest: gồm rich-content-core, math-templates, exam-authoring-core,
+                             # media-core, paste-sanitizer, classroom-core (logic thuần, không cần database)
+npm run build && npx next start -p 3123
+npm run test:e2e:authoring   # E2E thật qua HTTP + PostgreSQL
+```
+
+`test:e2e:authoring` cần `E2E_ADMIN_EMAIL`/`E2E_ADMIN_PASSWORD` (hoặc `ADMIN_EMAIL`/`ADMIN_PASSWORD`).
+Script dùng ba tài khoản cố định `e2e-teacher-a`, `e2e-teacher-b`, `e2e-student`
+(`@e2e.luyenthi.test`), tự tạo và dọn dữ liệu (lớp, đề, ảnh, lượt làm bài) nên chạy lại nhiều lần vẫn
+an toàn. Better Auth giới hạn 10 lượt đăng ký mỗi 10 phút cho một IP, nên lần chạy đầu liên tục có thể
+gặp `429` — script tự chờ rồi thử lại, hoặc xoá bảng `RateLimit` trong môi trường phát triển rồi chạy
+lại. Cần đặt `AUTH_TRUSTED_ORIGINS="http://localhost:3123"` khi chạy server kiểm thử (như các script E2E
+khác).
+
+E2E bao phủ: giáo viên lớp A không sửa/không đọc được đề lớp B; giáo viên không tạo được đề `PUBLIC`;
+học sinh bị chặn ở mọi endpoint soạn đề và không đọc được ảnh của đề chưa xuất bản; công thức lỗi bị
+phát hiện và chặn xuất bản; ảnh sai loại/quá lớn bị từ chối; giao đề theo lịch (chưa mở/đã đóng) và
+giới hạn số lượt; payload làm bài không chứa đáp án; mốc `revealAnswersAt` ẩn đáp án; nhân bản/sắp xếp
+câu hỏi không làm sai đáp án; lưu bằng phiên bản cũ trả `409` và không ghi đè; đề đã có bài làm bị khoá
+nhưng điểm cũ vẫn nguyên vẹn, và bản sao vẫn sửa được.
+
+### Migration và giới hạn còn lại
+
+Hai migration bổ sung cho tính năng này:
+
+- `20261006042514_authoring_exams_classrooms_media`: thêm `Exam.scope/classroomId/createdById/gradeLevel/
+  instructions/instructionsDoc/revision/publishedRevision/publishedAt`,
+  `Question.contentDoc/explanationDoc/rule`, `QuestionOption.contentDoc`,
+  `AttemptAnswer.snapshotContentDoc` cùng bốn model `Classroom`, `ClassroomMember`, `ExamAssignment`,
+  `MediaAsset`.
+- `20261006043533_attempt_snapshot_explanation_doc`: thêm `AttemptAnswer.snapshotExplanationDoc`.
+
+Mọi cột mới đều nullable hoặc có giá trị mặc định nên dữ liệu hiện có được giữ nguyên khi chạy
+`npm run db:migrate`. Thêm hai biến môi trường (tùy chọn) `MEDIA_STORAGE_DIR` và
+`MEDIA_MAX_UPLOAD_BYTES`; thư mục `storage/` đã được thêm vào `.gitignore`.
+
+Giới hạn có chủ ý trong đợt này: chưa hỗ trợ câu đúng/sai và trả lời ngắn (đã chặn ở backend), chưa có
+ngân hàng câu hỏi dùng chung, chưa có công cụ vẽ hình học (hình được tải lên dưới dạng ảnh), chưa có
+AI sinh đề hay nhập đề từ PDF/Word, và nội dung dán từ Word/website chỉ giữ định dạng cơ bản.
 
 ## API
 
@@ -308,7 +497,7 @@ trang vẫn trả `200` và client tự thử lại rồi hiển thị `ErrorBlo
 ## Kiểm thử
 
 ```bash
-npm test          # vitest run — 6 tệp / 106 test
+npm test          # vitest run — 11 tệp / 161 test
 npm run typecheck # tsc --noEmit
 npm run lint      # eslint .
 ```
@@ -321,6 +510,7 @@ npm run lint      # eslint .
 | `admin-core.test.ts` (9 test) | `assertCanModerateUser` (chặn tự khoá & khoá quản trị viên khác), `normalizeBanReason`/`normalizeReviewNote`, `toAdminUserSummaryDto`, `toAdminTeacherApplicationDto` |
 | `admin-service.test.ts` (18 test) | Với Prisma giả: `listAdminUsers` (lọc/tìm/phân trang), `setUserBanState` (lưu lý do, xoá phiên, giữ phiên khi mở khoá, chặn tự khoá, 404), `listAdminTeacherApplications`, `reviewTeacherApplication` (nâng vai trò, ghi lý do, `count: 0` khi bị xử lý song song, 404) |
 | `http.test.ts` (13 test) | `handleRouteError`: giữ nguyên `AppError`, map `ZodError` → 422, map lỗi hạ tầng (`ECONNREFUSED`, `P1001`, SQLSTATE `08*`/`3D000`/`28P01`, lỗi lồng trong `cause`) → `503 DATABASE_UNAVAILABLE`, còn lại → 500 |
+| `math-templates.test.ts` (14 test) | Gói mẫu công thức cho người không viết LaTeX: mọi mẫu có id duy nhất và id nhóm hợp lệ, mọi mẫu render được bằng KaTeX (`throwOnError: true`), `findMathPlaceholder` tìm đúng chỗ trống mà không khớp chữ cái trong tên lệnh (`\frac`, `\begin`), và `insertMathTemplate` chèn mẫu/ráp văn bản đang bôi đen vào chỗ trống |
 | `fake-prisma.ts` | Prisma in-memory (`exam`, `attempt`, `attemptAnswer`, `$transaction`) để test service không cần PostgreSQL |
 | `fake-admin-prisma.ts` | Prisma in-memory cho khu vực quản trị: `user`, `session`, `teacherApplication` với `findUniqueOrThrow`, `updateMany` trả `{ count }` (mô phỏng khoá lạc quan) và `$transaction` |
 
@@ -422,7 +612,7 @@ Sau khi đã chạy `db:seed` và `db:admin` (mục *Cài đặt và chạy*):
 | --- | --- |
 | `npm run typecheck` (`tsc --noEmit`) | 0 lỗi |
 | `npm run lint` (`eslint .`) | 0 lỗi, 0 cảnh báo |
-| `npm test` (`vitest run`) | 6 tệp, 106 test — tất cả pass |
+| `npm test` (`vitest run`) | 11 tệp, 161 test — tất cả pass |
 | `npx prisma validate` | `The schema at prisma\schema.prisma is valid` |
 | `npm run build` (`next build`) | Build production thành công: **21 route handler / 24 endpoint API**, **11 trang** (2 trang tĩnh `/`, `/dang-ky` + 9 trang dynamic) |
 
@@ -472,7 +662,7 @@ chứng trên bản build production (`npm run build` + `next start -p 3123`):
 | `GET /de-thi/seed-exam-tieng-anh-so-1` | `200`; HTML có dữ liệu đề (5 câu, thời lượng, tổng điểm) |
 | `npm run test:e2e` trên server này | 28/28 kiểm tra đạt |
 | `GET /de-thi` khi `DATABASE_URL` trỏ sai cổng | vẫn `200` (không có `seed-exam-*`, client sẽ hiện `ErrorBlock`), còn `/api/exams` trả `503 DATABASE_UNAVAILABLE` |
-| `npm run lint` / `npm run typecheck` / `npm test` sau khi sửa | 0 lỗi / 0 lỗi / 106 test đạt |
+| `npm run lint` / `npm run typecheck` / `npm test` sau khi sửa | 0 lỗi / 0 lỗi / 161 test đạt |
 
 ## Bước tiếp theo (gợi ý)
 

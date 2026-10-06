@@ -5,6 +5,7 @@ import { AppError } from "@/lib/errors";
 import { getPrisma } from "@/lib/prisma";
 
 import { roundScore } from "@/features/attempts/services/grading";
+import { parseRichDoc } from "@/features/authoring/services/rich-content-core";
 import type { ExamListQuery } from "@/features/exams/schemas/exam.schemas";
 import type {
   ExamDetailDto,
@@ -26,6 +27,13 @@ const examSummarySelect = {
   questions: { select: { points: true } },
 } as const;
 
+/** Chi tiết đề thi bổ sung hướng dẫn làm bài (bản chữ thuần + bản có cấu trúc). */
+const examDetailSelect = {
+  ...examSummarySelect,
+  instructions: true,
+  instructionsDoc: true,
+} as const;
+
 type ExamSummaryRow = {
   id: string;
   title: string;
@@ -36,6 +44,11 @@ type ExamSummaryRow = {
   isFeatured: boolean;
   subject: { id: string; name: string; slug: string; accentColor: string | null };
   questions: { points: number }[];
+};
+
+type ExamDetailRow = ExamSummaryRow & {
+  instructions: string | null;
+  instructionsDoc: unknown;
 };
 
 function toExamSummary(exam: ExamSummaryRow): ExamSummaryDto {
@@ -50,6 +63,14 @@ function toExamSummary(exam: ExamSummaryRow): ExamSummaryDto {
     questionCount: exam.questions.length,
     totalPoints: roundScore(exam.questions.reduce((sum, item) => sum + item.points, 0)),
     subject: exam.subject,
+  };
+}
+
+function toExamDetail(exam: ExamDetailRow): ExamDetailDto {
+  return {
+    ...toExamSummary(exam),
+    instructions: exam.instructions,
+    instructionsDoc: exam.instructionsDoc ? parseRichDoc(exam.instructionsDoc) : null,
   };
 }
 
@@ -85,7 +106,7 @@ export async function listExams(
   const prisma = getPrisma();
   const { page, pageSize } = query;
 
-  const where: Prisma.ExamWhereInput = { status: "PUBLISHED" };
+  const where: Prisma.ExamWhereInput = { status: "PUBLISHED", scope: "PUBLIC" };
   if (query.subjectId) {
     where.subjectId = query.subjectId;
   }
@@ -122,14 +143,16 @@ export async function listExams(
 
 export async function getExamById(examId: string): Promise<ExamDetailDto> {
   const prisma = getPrisma();
+  // Kho đề công khai chỉ trả về đề PUBLIC đã xuất bản. Đề của lớp không xuất hiện ở đây:
+  // học sinh truy cập qua mục lớp học của mình, nơi máy chủ kiểm tra tư cách thành viên.
   const exam = await prisma.exam.findFirst({
-    where: { id: examId, status: "PUBLISHED" },
-    select: examSummarySelect,
+    where: { id: examId, status: "PUBLISHED", scope: "PUBLIC" },
+    select: examDetailSelect,
   });
 
   if (!exam) {
     throw new AppError("EXAM_NOT_FOUND", "Không tìm thấy đề thi.", 404);
   }
 
-  return toExamSummary(exam);
+  return toExamDetail(exam);
 }

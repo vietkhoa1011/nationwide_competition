@@ -56,6 +56,8 @@ export const snapshotOptionSchema = z.object({
   label: z.string(),
   content: z.string(),
   order: z.number().int(),
+  /** Bản có cấu trúc (RichDoc) của phương án, có từ khi trình soạn thảo ra đời. */
+  doc: z.unknown().optional(),
 });
 
 export const snapshotOptionsSchema = z.array(snapshotOptionSchema);

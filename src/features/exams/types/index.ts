@@ -1,3 +1,5 @@
+import type { RichDoc } from "@/features/authoring/services/rich-content-core";
+
 export interface SubjectDto {
   id: string;
   name: string;
@@ -28,7 +30,11 @@ export interface ExamSummaryDto {
   subject: ExamSubjectDto;
 }
 
-export type ExamDetailDto = ExamSummaryDto;
+export type ExamDetailDto = ExamSummaryDto & {
+  /** Hướng dẫn làm bài (bản chữ thuần dự phòng) và bản có cấu trúc để render công thức/ảnh. */
+  instructions: string | null;
+  instructionsDoc: RichDoc | null;
+};
 
 export interface PaginatedResult<T> {
   items: T[];

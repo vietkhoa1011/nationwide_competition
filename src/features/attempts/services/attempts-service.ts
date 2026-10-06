@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { Prisma } from "@/generated/prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import { AppError } from "@/lib/errors";
 import { getPrisma } from "@/lib/prisma";
 
@@ -25,6 +25,16 @@ import {
   type SerializableAttemptRow,
 } from "@/features/attempts/services/attempt-core";
 import { gradeAttempt, roundScore } from "@/features/attempts/services/grading";
+import { isSupportedQuestionType } from "@/features/authoring/services/exam-authoring-core";
+import {
+  assertStudentMayStartExam,
+  canRevealAnswers,
+} from "@/features/classroom/services/classroom-core";
+import {
+  countFinishedAttempts,
+  findAssignmentForExam,
+  loadExamAccessForStudent,
+} from "@/features/classroom/services/classroom-service";
 import type {
   AttemptHistoryDto,
   AttemptResultDto,
@@ -58,7 +68,7 @@ const attemptRowSelect = {
   incorrectCount: true,
   unansweredCount: true,
   lastQuestionPosition: true,
-  exam: { select: { id: true, title: true, durationMinutes: true } },
+  exam: { select: { id: true, title: true, durationMinutes: true, scope: true, classroomId: true } },
   answers: {
     orderBy: { snapshotPosition: "asc" },
     select: {
@@ -68,7 +78,9 @@ const attemptRowSelect = {
       snapshotLevel: true,
       snapshotPoints: true,
       snapshotContent: true,
+      snapshotContentDoc: true,
       snapshotExplanation: true,
+      snapshotExplanationDoc: true,
       snapshotOptions: true,
       snapshotCorrectOptionIds: true,
       selectedOptionId: true,
@@ -79,6 +91,11 @@ const attemptRowSelect = {
 } as const;
 
 type AttemptRow = SerializableAttemptRow;
+
+/** Chuyển mảng snapshot sang giá trị JSON thuần của Prisma (bỏ `undefined`). */
+function toJsonInput(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
 
 async function findAttemptRow(attemptId: string): Promise<AttemptRow | null> {
   const row = await getPrisma().attempt.findUnique({
@@ -176,6 +193,8 @@ export async function startAttempt(
       id: true,
       title: true,
       durationMinutes: true,
+      scope: true,
+      classroomId: true,
       questions: {
         orderBy: { position: "asc" },
         select: {
@@ -186,12 +205,15 @@ export async function startAttempt(
             select: {
               id: true,
               content: true,
+              contentDoc: true,
               explanation: true,
+              explanationDoc: true,
+              rule: true,
               type: true,
               level: true,
               options: {
                 orderBy: { position: "asc" },
-                select: { id: true, label: true, content: true, position: true, isCorrect: true },
+                select: { id: true, label: true, content: true, contentDoc: true, position: true, isCorrect: true },
               },
             },
           },
@@ -211,7 +233,36 @@ export async function startAttempt(
     );
   }
 
+  // Đề chỉ được bắt đầu khi MỌI câu hỏi thuộc loại đã hỗ trợ chấm điểm. Kiểm tra này nằm
+  // ở máy chủ nên không thể lách bằng cách gọi thẳng API khi giao diện đã ẩn nút.
+  if (exam.questions.some((item) => !isSupportedQuestionType(item.question.type))) {
+    throw new AppError(
+      "QUESTION_TYPE_UNSUPPORTED",
+      "Đề có câu hỏi thuộc loại chưa được hệ thống hỗ trợ làm bài và chấm điểm.",
+      409,
+    );
+  }
+
   const now = new Date();
+
+  // Điều kiện của đề lớp: phải là thành viên lớp, phải có lần giao đề, cửa sổ phải đang
+  // mở và số lượt làm bài chưa vượt giới hạn giáo viên đặt.
+  const access = await loadExamAccessForStudent(owner.userId, {
+    id: exam.id,
+    scope: exam.scope,
+    classroomId: exam.classroomId,
+    durationMinutes: exam.durationMinutes,
+  });
+  const attemptsUsed =
+    owner.userId === null ? 0 : await countFinishedAttempts(owner.userId, exam.id);
+
+  assertStudentMayStartExam({
+    scope: exam.scope,
+    isClassMember: access.isClassMember,
+    assignment: access.assignment,
+    attemptsUsed,
+    now,
+  });
 
   const existing = await prisma.attempt.findFirst({
     where: {
@@ -235,7 +286,7 @@ export async function startAttempt(
       status: "IN_PROGRESS",
       startedAt: existing.startedAt.toISOString(),
       expiresAt: existing.expiresAt.toISOString(),
-      durationMinutes: exam.durationMinutes,
+      durationMinutes: access.durationMinutes,
       resumed: true,
     };
   }
@@ -247,7 +298,7 @@ export async function startAttempt(
   }
 
   const startedAt = new Date();
-  const expiresAt = computeExpiresAt(startedAt, exam.durationMinutes);
+  const expiresAt = computeExpiresAt(startedAt, access.durationMinutes);
 
   const attemptId = await prisma.$transaction(async (tx) => {
     const attempt = await tx.attempt.create({
@@ -270,6 +321,9 @@ export async function startAttempt(
           label: option.label,
           content: option.content,
           order: option.position,
+          // Ảnh/công thức của phương án đi kèm dưới dạng RichDoc để trang làm bài render
+          // bằng đúng renderer dùng trong trình soạn thảo.
+          doc: option.contentDoc ?? null,
         }));
         const correctOptionIds = examQuestion.question.options
           .filter((option) => option.isCorrect)
@@ -284,8 +338,10 @@ export async function startAttempt(
           snapshotLevel: examQuestion.question.level,
           snapshotPoints: examQuestion.points,
           snapshotContent: examQuestion.question.content,
+          snapshotContentDoc: examQuestion.question.contentDoc ?? Prisma.DbNull,
           snapshotExplanation: examQuestion.question.explanation,
-          snapshotOptions: options,
+          snapshotExplanationDoc: examQuestion.question.explanationDoc ?? Prisma.DbNull,
+          snapshotOptions: toJsonInput(options),
           snapshotCorrectOptionIds: correctOptionIds,
           snapshotRule: {
             scoring: "SINGLE_CHOICE_EXACT",
@@ -306,7 +362,7 @@ export async function startAttempt(
     status: "IN_PROGRESS",
     startedAt: startedAt.toISOString(),
     expiresAt: expiresAt.toISOString(),
-    durationMinutes: exam.durationMinutes,
+    durationMinutes: access.durationMinutes,
     resumed: false,
   };
 }
@@ -620,8 +676,18 @@ export async function getAttemptResult(
     attempt = await requireAttemptRow(attemptId);
   }
 
+  // Đề của lớp có thể đặt mốc "được xem đáp án": trước mốc đó, máy chủ loại đáp án đúng và
+  // lời giải khỏi payload (không gửi dữ liệu rồi ẩn bằng CSS ở trình duyệt).
+  const assignment = await findAssignmentForExam(attempt.examId, attempt.exam.classroomId ?? null);
+  const hideAnswers = !canRevealAnswers(assignment, {
+    now,
+    submitted: attempt.status !== "IN_PROGRESS",
+  });
+
   return serializeAttemptResult(attempt, {
     status: resolveEffectiveStatus(attempt.status, attempt.expiresAt, now),
     now,
+    hideAnswers,
+    answersRevealAt: assignment?.revealAnswersAt ?? null,
   });
 }

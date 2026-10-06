@@ -14,4 +14,14 @@ export const queryKeys = {
   /** Danh sách đơn xin quyền giáo viên cho trang quản trị. */
   adminTeacherApplications: (filters: Record<string, unknown>) =>
     ["admin", "teacher-applications", filters] as const,
+  /** Kho đề dành cho người soạn (giáo viên/quản trị viên). */
+  authoringExams: (filters: Record<string, unknown>) => ["authoring", "exams", filters] as const,
+  authoringExam: (examId: string) => ["authoring", "exam", examId] as const,
+  /** Lớp học mà người đang đăng nhập nhìn thấy. */
+  classrooms: (filters: Record<string, unknown>) => ["classrooms", filters] as const,
+  classroom: (classroomId: string) => ["classroom", classroomId] as const,
+  classroomAssignments: (classroomId: string) =>
+    ["classroom", classroomId, "assignments"] as const,
+  /** Góc nhìn của học sinh: lớp mình tham gia và đề đã được giao. */
+  myClassrooms: ["my", "classrooms"] as const,
 };

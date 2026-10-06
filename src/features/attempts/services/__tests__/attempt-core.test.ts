@@ -59,7 +59,13 @@ function attemptRow(overrides: Partial<SerializableAttemptRow> = {}): Serializab
     incorrectCount: null,
     unansweredCount: null,
     lastQuestionPosition: 1,
-    exam: { id: "exam-1", title: "Đề thi thử môn Toán — số 1", durationMinutes: 50 },
+    exam: {
+      id: "exam-1",
+      title: "Đề thi thử môn Toán — số 1",
+      durationMinutes: 50,
+      scope: "PUBLIC",
+      classroomId: null,
+    },
     answers: [answerRow()],
     ...overrides,
   };
@@ -245,7 +251,9 @@ describe("toStudentOptions / toCorrectOptionIds", () => {
       { id: "opt-a", label: "A", content: "Đáp án A", order: 1 },
     ]);
     expect(options.map((option) => option.id)).toEqual(["opt-a", "opt-b"]);
-    expect(Object.keys(options[0])).toEqual(["id", "label", "content", "order"]);
+    expect(Object.keys(options[0])).toEqual(["id", "label", "content", "order", "contentDoc"]);
+    // Snapshot cũ chưa có RichDoc vẫn đọc được, chỉ là `contentDoc` rỗng.
+    expect(options[0].contentDoc).toBeNull();
   });
 
   it("trả mảng rỗng khi dữ liệu snapshot không hợp lệ", () => {
@@ -285,6 +293,7 @@ describe("serializeStudentAttempt", () => {
 
     expect(Object.keys(dto.questions[0]).sort()).toEqual([
       "content",
+      "contentDoc",
       "isFlagged",
       "level",
       "options",
@@ -296,6 +305,7 @@ describe("serializeStudentAttempt", () => {
     ]);
     expect(Object.keys(dto.questions[0].options[0]).sort()).toEqual([
       "content",
+      "contentDoc",
       "id",
       "label",
       "order",

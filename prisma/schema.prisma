@@ -48,6 +48,23 @@ enum TeacherApplicationStatus {
   REJECTED
 }
 
+/// Phạm vi đề thi: đề công khai do quản trị viên quản lý, hoặc đề thuộc một lớp học.
+enum ExamScope {
+  PUBLIC
+  CLASS
+}
+
+/// Vai trò trong một lớp học: giáo viên phụ trách và học sinh của lớp.
+enum ClassroomMemberRole {
+  TEACHER
+  STUDENT
+}
+
+/// Loại tệp media của nội dung đề. Bản đầu chỉ nhận ảnh raster (PNG/JPEG/WEBP/GIF).
+enum MediaAssetKind {
+  IMAGE
+}
+
 model Subject {
   id          String   @id @default(cuid())
   name        String   @unique
@@ -61,6 +78,7 @@ model Subject {
   topics              Topic[]
   questions           Question[]
   exams               Exam[]
+  classrooms          Classroom[]
   teacherApplications TeacherApplication[]
 
   @@index([position])
@@ -80,15 +98,21 @@ model Topic {
 }
 
 model Question {
-  id          String        @id @default(cuid())
-  subjectId   String
-  topicId     String?
-  type        QuestionType  @default(SINGLE_CHOICE)
-  level       QuestionLevel @default(MEDIUM)
-  content     String
-  explanation String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id             String        @id @default(cuid())
+  subjectId      String
+  topicId        String?
+  type           QuestionType  @default(SINGLE_CHOICE)
+  level          QuestionLevel @default(MEDIUM)
+  /// Bản chữ thuần của nội dung (giữ để tương thích snapshot/luồng làm bài cũ).
+  content        String
+  explanation    String?
+  /// Nội dung có cấu trúc RichDoc — nguồn sự thật của trình soạn thảo.
+  contentDoc     Json?
+  explanationDoc Json?
+  /// Khai báo quy tắc chấm điểm riêng của từng loại câu (rỗng với SINGLE_CHOICE).
+  rule           Json?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   subject        Subject          @relation(fields: [subjectId], references: [id], onDelete: Restrict)
   topic          Topic?           @relation(fields: [topicId], references: [id], onDelete: SetNull)
@@ -106,6 +130,8 @@ model QuestionOption {
   questionId String
   label      String
   content    String
+  /// Bản chữ thuần (giữ để tương thích) và bản có cấu trúc RichDoc của phương án.
+  contentDoc Json?
   isCorrect  Boolean  @default(false)
   position   Int      @default(0)
   createdAt  DateTime @default(now())
@@ -118,26 +144,46 @@ model QuestionOption {
 }
 
 model Exam {
-  id              String     @id @default(cuid())
-  title           String
-  slug            String     @unique
-  description     String?
-  subjectId       String
-  durationMinutes Int
-  status          ExamStatus @default(DRAFT)
-  year            Int?
-  isFeatured      Boolean    @default(false)
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  id                String     @id @default(cuid())
+  title             String
+  slug              String     @unique
+  description       String?
+  subjectId         String
+  durationMinutes   Int
+  status            ExamStatus @default(DRAFT)
+  year              Int?
+  isFeatured        Boolean    @default(false)
+  /// Phạm vi đề: công khai (chỉ ADMIN quản lý) hoặc thuộc một lớp học.
+  scope             ExamScope  @default(PUBLIC)
+  classroomId       String?
+  createdById       String?
+  gradeLevel        Int?
+  /// Hướng dẫn làm bài: bản chữ thuần (dự phòng) và bản có cấu trúc RichDoc.
+  instructions      String?
+  instructionsDoc   Json?
+  /// Bộ đếm phiên bản nội dung — dùng phát hiện xung đột khi nhiều tab cùng sửa.
+  revision          Int        @default(1)
+  /// Phiên bản nội dung đã xuất bản gần nhất (NULL khi đề còn là nháp).
+  publishedRevision Int?
+  publishedAt       DateTime?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
 
-  subject   Subject        @relation(fields: [subjectId], references: [id], onDelete: Restrict)
-  questions ExamQuestion[]
-  attempts  Attempt[]
+  subject     Subject          @relation(fields: [subjectId], references: [id], onDelete: Restrict)
+  classroom   Classroom?       @relation(fields: [classroomId], references: [id], onDelete: SetNull)
+  createdBy   User?            @relation("ExamCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  questions   ExamQuestion[]
+  attempts    Attempt[]
+  assignments ExamAssignment[]
+  assets      MediaAsset[]
 
   @@index([subjectId])
   @@index([status])
   @@index([isFeatured])
   @@index([status, isFeatured])
+  @@index([scope, status])
+  @@index([classroomId])
+  @@index([createdById])
 }
 
 model ExamQuestion {
@@ -206,7 +252,11 @@ model AttemptAnswer {
   snapshotLevel            QuestionLevel
   snapshotPoints           Float
   snapshotContent          String
+  /// Bản có cấu trúc (RichDoc) của nội dung câu hỏi tại thời điểm bắt đầu bài.
+  snapshotContentDoc       Json?
   snapshotExplanation      String?
+  /// Bản có cấu trúc (RichDoc) của lời giải tại thời điểm bắt đầu bài.
+  snapshotExplanationDoc   Json?
   snapshotOptions          Json
   snapshotCorrectOptionIds Json
   snapshotRule             Json?
@@ -254,11 +304,17 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  sessions             Session[]
-  accounts             Account[]
-  attempts             Attempt[]
-  teacherApplications  TeacherApplication[] @relation("TeacherApplicationOwner")
-  reviewedApplications TeacherApplication[] @relation("TeacherApplicationReviewer")
+  sessions              Session[]
+  accounts              Account[]
+  attempts              Attempt[]
+  teacherApplications   TeacherApplication[] @relation("TeacherApplicationOwner")
+  reviewedApplications  TeacherApplication[] @relation("TeacherApplicationReviewer")
+  classroomsOwned       Classroom[]          @relation("ClassroomOwner")
+  classroomMemberships  ClassroomMember[]    @relation("ClassroomMemberUser")
+  classroomMembersAdded ClassroomMember[]    @relation("ClassroomMemberAdder")
+  examsCreated          Exam[]               @relation("ExamCreator")
+  examAssignments       ExamAssignment[]     @relation("AssignmentCreator")
+  mediaAssets           MediaAsset[]
 
   @@index([role])
   @@index([banned])
@@ -351,4 +407,114 @@ model TeacherApplication {
 
   @@index([status, createdAt])
   @@index([userId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Lớp học, giao đề và media của đề thi (tính năng tạo & quản lý đề thi).
+// ---------------------------------------------------------------------------
+
+/**
+ * Lớp học do một giáo viên phụ trách. Đề thi phạm vi CLASS luôn thuộc đúng một lớp;
+ * quyền quản lý đề suy ra từ lớp này chứ không nhận từ client.
+ */
+model Classroom {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  subjectId   String?
+  gradeLevel  Int?
+  ownerId     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  owner       User              @relation("ClassroomOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  subject     Subject?          @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  members     ClassroomMember[]
+  exams       Exam[]
+  assignments ExamAssignment[]
+  assets      MediaAsset[]
+
+  /// Một giáo viên không thể có hai lớp trùng tên (chặn tạo trùng do bấm nhiều lần).
+  @@unique([ownerId, name])
+  @@index([ownerId])
+  @@index([subjectId])
+}
+
+/**
+ * Thành viên lớp: giáo viên phụ trách cùng lớp và học sinh được thêm vào lớp.
+ */
+model ClassroomMember {
+  id          String              @id @default(cuid())
+  classroomId String
+  userId      String
+  role        ClassroomMemberRole @default(STUDENT)
+  addedById   String?
+  createdAt   DateTime            @default(now())
+
+  classroom Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  user      User      @relation("ClassroomMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+  addedBy   User?     @relation("ClassroomMemberAdder", fields: [addedById], references: [id], onDelete: SetNull)
+
+  @@unique([classroomId, userId])
+  @@index([classroomId, role])
+  @@index([userId])
+}
+
+/**
+ * Một lần giao đề cho một lớp. Tách khỏi nội dung đề: xuất bản nội dung và giao đề là
+ * hai thao tác riêng, nên lịch mở/đóng, thời lượng và số lượt làm nằm ở đây.
+ */
+model ExamAssignment {
+  id              String    @id @default(cuid())
+  examId          String
+  classroomId     String
+  createdById     String
+  title           String?
+  opensAt         DateTime?
+  closesAt        DateTime?
+  /// Ghi đè thời lượng làm bài của đề (phút); NULL nghĩa là dùng thời lượng của đề.
+  durationMinutes Int?
+  /// Số lượt làm tối đa cho mỗi học sinh; NULL nghĩa là không giới hạn.
+  allowedAttempts Int?
+  /// Mốc được phép xem đáp án/lời giải; NULL nghĩa là chỉ xem sau khi nộp bài.
+  revealAnswersAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  exam      Exam      @relation(fields: [examId], references: [id], onDelete: Cascade)
+  classroom Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("AssignmentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  /// Mỗi đề chỉ giao một lần cho một lớp.
+  @@unique([examId, classroomId])
+  @@index([classroomId])
+  @@index([examId])
+}
+
+/**
+ * Ảnh/đồ thị tải lên cho nội dung đề. Tệp nằm trên đĩa (`MEDIA_STORAGE_DIR`), database
+ * chỉ giữ metadata; nội dung đề tham chiếu tới đây bằng `assetId` nên không nhúng base64.
+ */
+model MediaAsset {
+  id          String         @id @default(cuid())
+  uploaderId  String
+  kind        MediaAssetKind @default(IMAGE)
+  mimeType    String
+  byteSize    Int
+  width       Int?
+  height      Int?
+  alt         String?
+  /// Tên tệp ngẫu nhiên trên đĩa (không dùng tên gốc do người dùng gửi lên).
+  storageKey  String         @unique
+  examId      String?
+  classroomId String?
+  createdAt   DateTime       @default(now())
+
+  uploader  User       @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  exam      Exam?      @relation(fields: [examId], references: [id], onDelete: SetNull)
+  classroom Classroom? @relation(fields: [classroomId], references: [id], onDelete: SetNull)
+
+  @@index([uploaderId])
+  @@index([examId])
+  @@index([classroomId])
 }

@@ -16,7 +16,8 @@ export function SiteHeader() {
 
   return (
     <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
-      <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+      {/* Thanh đầu trang dùng hết bề ngang màn hình, khớp với `main` (xem `src/app/layout.tsx`). */}
+      <div className="flex w-full items-center justify-between gap-4 px-4 py-3 sm:px-6">
         <Link href="/" className="flex items-center gap-2">
           <span className="flex size-9 items-center justify-center rounded-xl bg-sky-600 text-sm font-bold text-white">
             27

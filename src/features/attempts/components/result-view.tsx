@@ -2,9 +2,10 @@
 
 import { ButtonLink } from "@/components/ui/button";
 import { Badge, Card, CardBody } from "@/components/ui/card";
-import { ErrorBlock, LoadingBlock } from "@/components/ui/feedback";
+import { ErrorBlock, LoadingBlock, Alert } from "@/components/ui/feedback";
 import { useAttemptResult } from "@/features/attempts/hooks/use-attempt";
 import type { AttemptResultDto, ResultQuestionDto } from "@/features/attempts/types";
+import { RichContent } from "@/features/content/components/rich-content";
 import { cn, formatDateTime, formatPercent, formatScore } from "@/lib/utils";
 
 const statusLabels: Record<string, string> = {
@@ -87,6 +88,16 @@ function ResultContent({ result }: { result: AttemptResultDto }) {
             </p>
           </div>
 
+          {result.answersHidden ? (
+            <Alert tone="info">
+              {result.answersRevealAt
+                ? `Giáo viên chưa mở đáp án và lời giải cho lớp. Bạn xem được từ ${formatDateTime(
+                    result.answersRevealAt,
+                  )}.`
+                : "Đáp án và lời giải chưa được mở cho lớp này."}
+            </Alert>
+          ) : null}
+
           <dl className="grid grid-cols-3 gap-3 text-center">
             <div className="rounded-xl bg-emerald-50 px-3 py-3">
               <dt className="text-xs text-emerald-700">Đúng</dt>
@@ -146,9 +157,12 @@ function QuestionReview({ question, index }: { question: ResultQuestionDto; inde
           </span>
         </div>
 
-        <p className="whitespace-pre-line text-sm leading-relaxed text-slate-900">
-          {question.content}
-        </p>
+        <RichContent
+          doc={question.contentDoc}
+          text={question.content}
+          compact
+          className="text-slate-900"
+        />
 
         <ul className="space-y-2">
           {question.options.map((option) => {
@@ -179,7 +193,12 @@ function QuestionReview({ question, index }: { question: ResultQuestionDto; inde
                 >
                   {option.label}
                 </span>
-                <span className="text-sm leading-relaxed text-slate-800">{option.content}</span>
+                <RichContent
+                  doc={option.contentDoc}
+                  text={option.content}
+                  compact
+                  className="text-slate-800"
+                />
                 <span className="ml-auto shrink-0 text-xs font-semibold">
                   {isSelected ? (
                     <span className={isCorrectOption ? "text-emerald-700" : "text-rose-600"}>
@@ -197,9 +216,12 @@ function QuestionReview({ question, index }: { question: ResultQuestionDto; inde
         {question.explanation ? (
           <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">Lời giải</p>
-            <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-sky-900">
-              {question.explanation}
-            </p>
+            <RichContent
+              doc={question.explanationDoc}
+              text={question.explanation}
+              compact
+              className="mt-1 text-sky-900"
+            />
           </div>
         ) : null}
       </CardBody>

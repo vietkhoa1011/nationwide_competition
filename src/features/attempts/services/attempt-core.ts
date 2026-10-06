@@ -1,6 +1,10 @@
 import { AppError } from "@/lib/errors";
 
 import {
+  normalizeRichDoc,
+  type RichDoc,
+} from "@/features/authoring/services/rich-content-core";
+import {
   snapshotCorrectOptionIdsSchema,
   snapshotOptionsSchema,
 } from "@/features/attempts/schemas/attempt.schemas";
@@ -51,7 +55,11 @@ export interface SerializableAttemptAnswerRow {
   snapshotLevel: string;
   snapshotPoints: number;
   snapshotContent: string;
+  /** Bản có cấu trúc (RichDoc) của nội dung tại thời điểm bắt đầu bài. */
+  snapshotContentDoc?: unknown;
   snapshotExplanation: string | null;
+  /** Bản có cấu trúc (RichDoc) của lời giải tại thời điểm bắt đầu bài. */
+  snapshotExplanationDoc?: unknown;
   snapshotOptions: unknown;
   snapshotCorrectOptionIds: unknown;
   selectedOptionId: string | null;
@@ -71,6 +79,8 @@ export interface SerializableAttemptRow extends AttemptTimingRow {
     id: string;
     title: string;
     durationMinutes: number;
+    scope: "PUBLIC" | "CLASS";
+    classroomId: string | null;
   };
   answers: SerializableAttemptAnswerRow[];
 }
@@ -170,7 +180,28 @@ export function toStudentOptions(raw: unknown): StudentOptionDto[] {
   if (!parsed.success) {
     return [];
   }
-  return [...parsed.data].sort((a, b) => a.order - b.order);
+
+  return [...parsed.data]
+    .sort((a, b) => a.order - b.order)
+    .map((option) => ({
+      id: option.id,
+      label: option.label,
+      content: option.content,
+      order: option.order,
+      contentDoc: option.doc ? normalizeRichDoc(option.doc) : null,
+    }));
+}
+
+/** Chuẩn hoá RichDoc của snapshot; dữ liệu cũ (không có) trả về null. */
+export function toSnapshotDoc(raw: unknown): RichDoc | null {
+  if (raw === null || raw === undefined) {
+    return null;
+  }
+  try {
+    return normalizeRichDoc(raw);
+  } catch {
+    return null;
+  }
 }
 
 export function toCorrectOptionIds(raw: unknown): string[] {
@@ -190,6 +221,7 @@ function toStudentQuestion(answer: SerializableAttemptAnswerRow): StudentQuestio
     level: answer.snapshotLevel,
     points: answer.snapshotPoints,
     content: answer.snapshotContent,
+    contentDoc: toSnapshotDoc(answer.snapshotContentDoc),
     options: toStudentOptions(answer.snapshotOptions),
     selectedOptionId: answer.selectedOptionId,
     isFlagged: answer.isFlagged,
@@ -227,28 +259,42 @@ export function serializeStudentAttempt(
   };
 }
 
-function toResultQuestion(answer: SerializableAttemptAnswerRow): ResultQuestionDto {
+function toResultQuestion(
+  answer: SerializableAttemptAnswerRow,
+  hideAnswers: boolean,
+): ResultQuestionDto {
   return {
     questionId: answer.questionId,
     position: answer.snapshotPosition,
     type: answer.snapshotType,
     level: answer.snapshotLevel,
     content: answer.snapshotContent,
+    contentDoc: toSnapshotDoc(answer.snapshotContentDoc),
     points: answer.snapshotPoints,
     earnedPoints: answer.isCorrect ? answer.snapshotPoints : 0,
     options: toStudentOptions(answer.snapshotOptions),
     selectedOptionId: answer.selectedOptionId,
-    correctOptionIds: toCorrectOptionIds(answer.snapshotCorrectOptionIds),
+    correctOptionIds: hideAnswers ? [] : toCorrectOptionIds(answer.snapshotCorrectOptionIds),
     isCorrect: Boolean(answer.isCorrect),
-    explanation: answer.snapshotExplanation,
+    explanation: hideAnswers ? null : answer.snapshotExplanation,
+    explanationDoc: hideAnswers ? null : toSnapshotDoc(answer.snapshotExplanationDoc),
   };
 }
 
 export function serializeAttemptResult(
   attempt: SerializableAttemptRow,
-  options: { status: AttemptStatusValue; now: Date },
+  options: {
+    status: AttemptStatusValue;
+    now: Date;
+    /** true khi lần giao đề chưa tới mốc được xem đáp án → máy chủ loại đáp án/lời giải. */
+    hideAnswers?: boolean;
+    answersRevealAt?: Date | null;
+  },
 ): AttemptResultDto {
-  const questions = sortAnswers(attempt.answers).map(toResultQuestion);
+  const hideAnswers = options.hideAnswers === true;
+  const questions = sortAnswers(attempt.answers).map((answer) =>
+    toResultQuestion(answer, hideAnswers),
+  );
 
   return {
     id: attempt.id,
@@ -264,6 +310,8 @@ export function serializeAttemptResult(
     correctCount: attempt.correctCount ?? 0,
     incorrectCount: attempt.incorrectCount ?? 0,
     unansweredCount: attempt.unansweredCount ?? 0,
+    answersHidden: hideAnswers,
+    answersRevealAt: options.answersRevealAt ? options.answersRevealAt.toISOString() : null,
     questions,
   };
 }

@@ -2,6 +2,7 @@
 
 import { Badge, Card, CardBody } from "@/components/ui/card";
 import { ErrorBlock, LoadingBlock } from "@/components/ui/feedback";
+import { RichContent } from "@/features/content/components/rich-content";
 import { StartAttemptButton } from "@/features/exams/components/start-attempt-button";
 import { useExam } from "@/features/exams/hooks/use-exams";
 import type { ExamDetailDto } from "@/features/exams/types";
@@ -75,12 +76,20 @@ export function ExamDetailView({
       <Card>
         <CardBody className="space-y-4">
           <h2 className="text-base font-semibold text-slate-900">Hướng dẫn làm bài</h2>
-          <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-slate-600">
-            <li>Thời gian đếm ngược do máy chủ quyết định — hết giờ hệ thống tự chấm bài.</li>
-            <li>Đáp án được lưu ngay khi bạn chọn, không cần bấm nút lưu.</li>
-            <li>Bạn có thể đánh dấu câu hỏi để xem lại và chuyển nhanh bằng bảng điều hướng.</li>
-            <li>Đáp án đúng và lời giải chỉ hiện ra sau khi nộp bài.</li>
-          </ul>
+          {exam.instructionsDoc ? (
+            <RichContent
+              doc={exam.instructionsDoc}
+              text={exam.instructions}
+              className="text-sm text-slate-600"
+            />
+          ) : (
+            <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed text-slate-600">
+              <li>Thời gian đếm ngược do máy chủ quyết định — hết giờ hệ thống tự chấm bài.</li>
+              <li>Đáp án được lưu ngay khi bạn chọn, không cần bấm nút lưu.</li>
+              <li>Bạn có thể đánh dấu câu hỏi để xem lại và chuyển nhanh bằng bảng điều hướng.</li>
+              <li>Đáp án đúng và lời giải chỉ hiện ra sau khi nộp bài.</li>
+            </ul>
+          )}
           <StartAttemptButton
             examId={exam.id}
             disabled={exam.questionCount === 0}

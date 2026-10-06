@@ -38,6 +38,19 @@ const serverEnvSchema = z.object({
    * Dùng khi chạy nhiều cổng/cổng kiểm thử, ví dụ http://localhost:3123.
    */
   AUTH_TRUSTED_ORIGINS: z.string().trim().optional(),
+  /**
+   * Thư mục lưu tệp media của đề thi (ảnh/đồ thị tải lên), tính tương đối từ gốc dự án.
+   * Thư mục này KHÔNG nằm trong `public/` nên trình duyệt chỉ đọc được qua
+   * `/api/media/[assetId]` sau khi máy chủ kiểm tra quyền.
+   */
+  MEDIA_STORAGE_DIR: z.string().trim().min(1).default("storage/uploads"),
+  /** Kích thước tối đa của một tệp media (byte). Mặc định 4 MiB. */
+  MEDIA_MAX_UPLOAD_BYTES: z.coerce
+    .number()
+    .int()
+    .min(64 * 1024)
+    .max(20 * 1024 * 1024)
+    .default(4 * 1024 * 1024),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
@@ -55,6 +68,8 @@ export function getServerEnv(): ServerEnv {
     BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET,
     BETTER_AUTH_URL: process.env.BETTER_AUTH_URL,
     AUTH_TRUSTED_ORIGINS: process.env.AUTH_TRUSTED_ORIGINS,
+    MEDIA_STORAGE_DIR: process.env.MEDIA_STORAGE_DIR,
+    MEDIA_MAX_UPLOAD_BYTES: process.env.MEDIA_MAX_UPLOAD_BYTES,
   });
 
   if (!parsed.success) {
